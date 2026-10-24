@@ -1,0 +1,13 @@
+# Environment of the reported runs (recorded in every run record):
+# Python 3.14.6, CPU only, torch.use_deterministic_algorithms(True).
+torch==2.14.1
+torch-geometric==2.8.1
+
+# Versions used to run the analysis scripts in analysis/.
+numpy==2.5.3
+scipy==1.18.1
+pandas==3.0.5
+scikit-learn==1.9.1
+networkx==3.7
+matplotlib==3.11.2
+PyYAML==6.0.3
