@@ -1,18 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-partition.py — federated partitioning of the graph across clients
-========================================================
-🔴 This module directly addresses the most serious weakness of the earlier version:
+partition.py - federated partitioning of the graph across clients
 
-    "A random node partition with K=10 reduces edge retention to ≈15.6% and the
-     mean within-client degree to ≈0.49; in this regime graph message passing
-     is almost ineffective and the GNN effectively becomes an MLP."
-
-Solution: the default partition is **community-based (Louvain)**, which keeps as
-many edges as possible inside each client instead of cutting the graph at random.
-The "random_node" and "dirichlet_label" partitions are kept only for the
-sensitivity analysis in the paper, precisely to be able to show why Louvain
-was chosen.
+A random node partition with K=10 keeps only about 10% of the edges of the
+labelled subgraph inside clients (0.099 on the released runs), so graph
+message passing has little to work with. The default partition is therefore
+community-based (Louvain), which keeps almost all edges inside clients. The
+"random_node" and "dirichlet_label" partitions are kept for the sensitivity
+analysis.
 """
 
 from __future__ import annotations
@@ -30,9 +25,7 @@ from src.config import PartitionConfig
 logger = logging.getLogger("fedgnn.data.partition")
 
 
-# ==============================================================================
 # Shared helpers
-# ==============================================================================
 def _to_networkx_undirected(data: Data) -> nx.Graph:
     """Build a light nx.Graph (structure only, no feature copy) for community detection."""
     G = nx.Graph()
@@ -91,13 +84,11 @@ def _assignment_from_bins(bins: Dict[int, List[int]], num_nodes: int) -> np.ndar
     for client_id, nodes in bins.items():
         assignment[nodes] = client_id
     if (assignment == -1).any():
-        raise RuntimeError("❌ some nodes were not assigned to any client (internal partition bug).")
+        raise RuntimeError("some nodes were not assigned to any client (internal partition bug).")
     return assignment
 
 
-# ==============================================================================
 # 1) Louvain scheme (default)
-# ==============================================================================
 def _partition_louvain(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     G = _to_networkx_undirected(data)
     communities = nx.algorithms.community.louvain_communities(
@@ -110,15 +101,13 @@ def _partition_louvain(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarra
     return _assignment_from_bins(bins, data.num_nodes)
 
 
-# ==============================================================================
 # 2) METIS scheme (optional, with automatic fallback)
-# ==============================================================================
 def _partition_metis(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     try:
         import metis  # type: ignore
     except ImportError:
         logger.warning(
-            "⚠️ the 'metis' library is not installed; graceful degradation -> falling back to Louvain."
+            "the 'metis' library is not installed; falling back to Louvain."
         )
         return _partition_louvain(data, cfg, seed)
 
@@ -127,29 +116,24 @@ def _partition_metis(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     try:
         _, parts = metis.part_graph(G, nparts=cfg.num_clients, ufactor=cfg.metis_ufactor, seed=seed)
     except Exception as e:
-        logger.warning(f"⚠️ METIS failed ({e}); falling back to Louvain.")
+        logger.warning(f"METIS failed ({e}); falling back to Louvain.")
         return _partition_louvain(data, cfg, seed)
 
     return np.array(parts, dtype=np.int64)
 
 
-# ==============================================================================
 # 3) Random node scheme (old baseline, for sensitivity analysis only)
-# ==============================================================================
 def _partition_random_node(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     """
-    ⚠️ This is the scheme that destroyed the graph structure in the earlier version.
-    It is kept deliberately so that the paper can show with numbers why it
-    should not be used (ablation table over partition.scheme).
+    Uniform random assignment of nodes to clients. Used for protocols B, F and R
+    to compare against the Louvain partition.
     """
     rng = np.random.RandomState(seed)
     assignment = rng.randint(0, cfg.num_clients, size=data.num_nodes)
     return assignment.astype(np.int64)
 
 
-# ==============================================================================
 # 4) Dirichlet scheme on labels (strong label-skew non-IID)
-# ==============================================================================
 def _partition_dirichlet_label(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     rng = np.random.RandomState(seed)
     y = data.y.cpu().numpy()
@@ -168,9 +152,7 @@ def _partition_dirichlet_label(data: Data, cfg: PartitionConfig, seed: int) -> n
     return assignment
 
 
-# ==============================================================================
 # 5) Temporal shard scheme (split by time window; another sensitivity setting)
-# ==============================================================================
 def _partition_temporal_shard(data: Data, cfg: PartitionConfig, seed: int) -> np.ndarray:
     time_step = data.time_step.cpu().numpy()
     unique_steps = np.sort(np.unique(time_step))
@@ -183,9 +165,7 @@ def _partition_temporal_shard(data: Data, cfg: PartitionConfig, seed: int) -> np
     return assignment
 
 
-# ==============================================================================
 # Run the selected scheme
-# ==============================================================================
 _SCHEME_DISPATch = {
     "louvain": _partition_louvain,
     "metis": _partition_metis,
@@ -201,9 +181,7 @@ def _run_scheme(scheme: str, data: Data, cfg: PartitionConfig, seed: int) -> np.
     return _SCHEME_DISPATch[scheme](data, cfg, seed)
 
 
-# ==============================================================================
 # Repair of invalid assignments (reassignment)
-# ==============================================================================
 def _validate_and_fix(
     assignment: np.ndarray, data: Data, cfg: PartitionConfig, seed: int
 ) -> np.ndarray:
@@ -229,12 +207,12 @@ def _validate_and_fix(
         )[0]
 
         if len(violations) == 0:
-            logger.info(f"✓ client assignment is valid (attempt {attempt}).")
+            logger.info(f"client assignment is valid (attempt {attempt}).")
             return assignment
 
         if not cfg.reassign_if_infeasible:
             logger.warning(
-                f"⚠️ {len(violations)} clients do not meet the minimum conditions and "
+                f"{len(violations)} clients do not meet the minimum conditions and "
                 f"reassign_if_infeasible=False; continuing without repair."
             )
             return assignment
@@ -261,15 +239,13 @@ def _validate_and_fix(
         assignment[move_idx] = needy
 
     logger.warning(
-        f"⚠️ after {cfg.max_repartition_attempts} attempts not all minimum constraints "
+        f"after {cfg.max_repartition_attempts} attempts not all minimum constraints "
         f"were satisfied. Record the final distribution in the report (transparency)."
     )
     return assignment
 
 
-# ==============================================================================
 # Partition diagnostics (for the paper and for aggregation.py)
-# ==============================================================================
 def compute_partition_diagnostics(
     assignment: np.ndarray, data: Data, cfg: PartitionConfig
 ) -> Dict:
@@ -324,7 +300,7 @@ def compute_partition_diagnostics(
     }
 
     logger.info(
-        f"📊 partition '{cfg.scheme}': edge_retention={edge_retention_rate:.3f} | "
+        f"partition '{cfg.scheme}': edge_retention={edge_retention_rate:.3f} | "
         f"imbalance={imbalance_ratio:.3f} | "
         f"avg_degree_overall={np.mean([v['avg_degree'] for v in per_client.values()]):.3f}"
     )
@@ -337,7 +313,7 @@ def partition_graph(
     """
     Main entry point of federated partitioning.
 
-    Following the lessons of the earlier version, this function:
+    This function:
       1) runs the selected scheme (default: louvain),
       2) validates the assignment against the minimum constraints (min_nodes/min_positives)
          and repairs it if needed,
@@ -349,8 +325,8 @@ def partition_graph(
         data: global Elliptic graph (output of elliptic.load_elliptic_graph).
         cfg: partition settings (PartitionConfig).
         seed: seed of this run. If cfg.repartition_per_seed=True, the
-            partition itself is one of the sources of between-seed variance
-            (a more honest approach than keeping the partition fixed).
+            partition is redrawn for every seed and contributes to the
+            between-seed variance.
 
     Returns:
         (assignment, diagnostics):
@@ -361,7 +337,7 @@ def partition_graph(
     effective_seed = seed if cfg.repartition_per_seed else int(getattr(cfg, "fixed_partition_seed", 0))
 
     logger.info(
-        f"🔧 partitioning started | scheme={cfg.scheme} | "
+        f"partitioning started | scheme={cfg.scheme} | "
         f"num_clients={cfg.num_clients} | seed={effective_seed} "
         f"(repartition_per_seed={cfg.repartition_per_seed})"
     )
@@ -383,8 +359,7 @@ def run_partition_sensitivity(
     """
     Run several partition schemes (cfg.sensitivity_schemes) on the same graph
     and the same seed, to produce the comparison table of sensitivity to the
-    partition type in the paper. The absence of exactly this analysis in the
-    earlier version is why the random-partition problem went unnoticed.
+    partition type.
 
     Returns:
         dict {scheme_name: diagnostics} for all requested schemes.
@@ -394,7 +369,7 @@ def run_partition_sensitivity(
 
     for scheme in cfg.sensitivity_schemes:
         cfg.scheme = scheme
-        logger.info(f"📐 partition sensitivity analysis: running scheme '{scheme}'...")
+        logger.info(f"partition sensitivity analysis: running scheme '{scheme}'...")
         assignment, diagnostics = partition_graph(data, cfg, seed)
         results[scheme] = diagnostics
 
@@ -402,9 +377,7 @@ def run_partition_sensitivity(
     return results
 
 
-# ==============================================================================
-# Compatibility layer with the src/train.py contract
-# ==============================================================================
+# Entry points used by src/train.py
 def partition_graph_federated(data, cfg, seed: int = 42, **kw):
     """Name expected by train.py; delegates directly to partition_graph."""
     return partition_graph(data, cfg, seed, **kw)

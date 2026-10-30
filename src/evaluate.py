@@ -1,12 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-evaluate.py — model evaluation on any split (val/test); single source of truth for metrics
-==============================================================================
-The only place in the project where evaluation metrics (AP, AUC, F1, Precision,
-Recall, Confusion Matrix) are computed. Both client.py (for the local val of each
-round) and train.py (for the final global test) must use only
-evaluate_variant_on_global_test/evaluate_split; no metric formula may be
-rewritten anywhere else.
+"""Evaluation metrics (AP, ROC-AUC, F1, precision, recall, confusion matrix)
+on a node mask, global-test evaluation of a trained model and validation-tuned
+thresholds.
 """
 
 from __future__ import annotations
@@ -31,17 +26,12 @@ from src.compat import safe_forward
 
 logger = logging.getLogger("fedgnn.evaluate")
 
-# NOTE (state of the codebase, not an aspiration):
-#   client.py currently computes val AP/AUC with sklearn directly. Those two
-#   metrics are threshold-independent and use the identical sklearn calls, so
-#   they are numerically identical to this module. Every THRESHOLD-DEPENDENT
-#   metric reported in the paper (F1/Precision/Recall/MCC/CM) comes only from
-#   evaluate_split below. Routing client.py through evaluate_split is pending.
+# client.py computes validation AP and AUC with the same sklearn calls as this
+# module, so the values are identical. Threshold-dependent metrics (F1,
+# precision, recall, MCC, confusion matrix) come only from evaluate_split.
 
 
-# ==============================================================================
 # Evaluation on an arbitrary mask of a single Data object
-# ==============================================================================
 @torch.no_grad()
 def evaluate_split(
     model: torch.nn.Module,
@@ -56,11 +46,10 @@ def evaluate_split(
     """
     Full computation of the standard binary classification metrics on the mask subset.
 
-    Notes on scientific honesty:
+    Notes:
       - if the mask contains no positive example, AP/AUC are meaningless; in
         that case NaN is returned instead of a silent skip, and handling it is
-        left to the caller (partial fail-fast: no crash, but nothing is
-        hidden either).
+        left to the caller.
       - the hard classification threshold (for F1/Precision/Recall) is argmax over
         the two-dimensional logits, not an arbitrary threshold on p(class 1).
     """
@@ -86,7 +75,7 @@ def evaluate_split(
 
     if n_pos == 0 or n_pos == n_total:
         logger.warning(
-            f"⚠️ evaluate_split: mask with {n_total} samples has only one class "
+            f"evaluate_split: mask with {n_total} samples has only one class "
             f"(n_pos={n_pos}); AP/AUC set to NaN."
         )
         ap, auc = float("nan"), float("nan")
@@ -119,10 +108,8 @@ def evaluate_split(
     }
 
 
-# ==============================================================================
 # v7: metrics from a score vector (used by per-client inference, where scores
 # from several client subgraphs are concatenated before computing metrics)
-# ==============================================================================
 @torch.no_grad()
 def predict_scores(model, x, edge_index, boundary_idx=None) -> np.ndarray:
     """p(y=1) for every node of one graph, model in eval mode."""
@@ -185,9 +172,7 @@ def tuned_metrics_from_scores(
     return out
 
 
-# ==============================================================================
 # Thin wrapper for the final global test evaluation (used in train.py)
-# ==============================================================================
 @torch.no_grad()
 def evaluate_variant_on_global_test(
     model: torch.nn.Module,
@@ -198,7 +183,7 @@ def evaluate_variant_on_global_test(
     """
     Thin wrapper over evaluate_split for evaluating the optimized global model on
     the global test set (no client split); the only path used in train.py for
-    the paper's final report (single source of truth for the final evaluation).
+    the final report.
     """
     boundary_idx = getattr(data, "boundary_idx", None)
     return evaluate_split(
@@ -212,9 +197,7 @@ def evaluate_variant_on_global_test(
     )
 
 
-# ==============================================================================
-# Threshold selection on val (never on test) — P0-2
-# ==============================================================================
+# Threshold selection on the validation period (never on test)
 def find_best_threshold(
     y_true: np.ndarray,
     probs: np.ndarray,
@@ -242,7 +225,7 @@ def find_best_threshold(
     n_pos = int((y_true == 1).sum())
     if n_pos == 0 or n_pos == y_true.size:
         logger.warning(
-            "⚠️ find_best_threshold: tuning split has a single class; "
+            "find_best_threshold: tuning split has a single class; "
             "falling back to the default threshold 0.5 (no calibration)."
         )
         return {"threshold": 0.5, "score": float("nan"), "n_candidates": 0}
@@ -308,7 +291,7 @@ def evaluate_variant_on_global_test_tuned(
     out["confusion_matrix_at_default"] = m_def["confusion_matrix"]
 
     logger.info(
-        f"🎯 threshold from val: τ*={tau:.4f} (val_F1={sel['score']:.4f}) | "
+        f"threshold from val: τ*={tau:.4f} (val_F1={sel['score']:.4f}) | "
         f"test_F1: {m_def['f1']:.4f} @0.5 → {out['f1']:.4f} @τ* | "
         f"P={out['precision']:.4f} R={out['recall']:.4f} MCC={out['mcc']:.4f} | "
         f"AP={out['ap']:.4f} (unchanged)"

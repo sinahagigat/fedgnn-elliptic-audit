@@ -1,18 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-train.py — orchestrator of the experiment matrix (variant × seed) — v5.0.1
-==============================================================================
-This version is written against the actual signatures of the existing modules:
-  • load_elliptic_raw(cfg: DataConfig)            -> Data
-  • preprocess_elliptic(data, cfg)                -> Data          (single value)
-  • partition_graph_federated(data, cfg, seed)    -> (assignment, diagnostics)
-  • build_federated_dataset(data, assignment, cfg)-> List[FederatedClientData]
-  • FederatedClient(client_id, fcd, in_dim, model_cfg, virtual_cfg,
-                    fed_cfg, use_virtual_nodes, device)
-  • FedGNNModel.forward(x, edge_index, boundary_local_idx=None)
-
-Principles: resume by default | atomic save after every run | graceful degradation
-at loop level | fail fast at module level | output always JSON-safe.
+"""Run the experiment matrix (variant x seed): load and partition the data once
+per partition seed, train each variant (centralized or federated), evaluate it
+and write the run record. Finished runs are skipped on restart, and the
+artifacts file is written atomically after every run.
 """
 
 from __future__ import annotations
@@ -61,9 +51,7 @@ from src.compat import safe_forward
 logger = logging.getLogger("fedgnn.train")
 
 
-# ==============================================================================
 # Defensive helpers: none of them changes the scientific logic, they only remove brittleness
-# ==============================================================================
 def _jsonable(obj: Any) -> Any:
     """Recursive conversion to a JSON-serializable structure (numpy/torch/Path/...)."""
     if obj is None or isinstance(obj, (bool, int, float, str)):
@@ -160,9 +148,7 @@ def _class_weight(y: torch.Tensor, mask: torch.Tensor, fed_cfg, device: str):
     return torch.tensor([1.0, w], dtype=torch.float32, device=device)
 
 
-# ==============================================================================
 # Single run
-# ==============================================================================
 def run_single_experiment(
     cfg: Config,
     variant: VariantSpec,
@@ -210,9 +196,7 @@ def run_single_experiment(
     return artifact
 
 
-# ==============================================================================
 # v7 helpers
-# ==============================================================================
 def _patience_converged(history_vals: List[float], patience: int, min_delta: float) -> bool:
     """Same rule as FederatedServer: patience rounds without a min_delta gain."""
     best, since = -1.0, 0
@@ -247,9 +231,7 @@ def _local_scores(model, client_datasets, device, use_boundary: bool):
     return out
 
 
-# ==============================================================================
 # Centralized path: non-federated baseline (upper reference)
-# ==============================================================================
 def _run_centralized(
     cfg: Config, variant: VariantSpec, seed: int, full_data, in_dim: int,
     t_start: Optional[float] = None,
@@ -346,9 +328,7 @@ def _run_centralized(
     return out
 
 
-# ==============================================================================
 # Federated path: FedAvg / FedProto / FedGNN_Hard / FedGNN_Soft
-# ==============================================================================
 def _run_federated(
     cfg: Config,
     variant: VariantSpec,
@@ -390,7 +370,7 @@ def _run_federated(
                 device=device,
             )
         )
-    assert len(clients) >= 2, f"❌ not enough clients: {len(clients)}"
+    assert len(clients) >= 2, f"not enough clients: {len(clients)}"
 
     server = FederatedServer(
         clients=clients, initial_state_dict=initial_state, fed_cfg=fed_cfg
@@ -398,18 +378,18 @@ def _run_federated(
     res = server.run()
     train_time = time.time() - (t_start if t_start is not None else time.time())
 
-    # --- best checkpoint: explicit API first, then dict key ---
+    # best checkpoint: explicit API first, then dict key
     best_state = None
     try:
         best_state = server.get_best_model_state()
     except Exception as _exc:
-        logger.warning(f"⚠️ previously swallowed exception (P0-9): "
+        logger.warning(f"get_best_model_state failed: "
                        f"{type(_exc).__name__}: {_exc}", exc_info=True)
     if best_state is None:
         best_state = _get(res, "best_state_dict") or _get(res, "best_state")
-    assert best_state is not None, "❌ the server returned no final state."
+    assert best_state is not None, "the server returned no final state."
 
-    # --- evaluation on the global test set, not on any client's local data ---
+    # evaluation on the global test set, not on any client's local data
     gtest = _first(build_global_test_split(full_data, cfg=cfg.data, seed=seed)).to(device)
     global_model.load_state_dict(best_state)
     test_metrics = evaluate_variant_on_global_test(
@@ -471,9 +451,7 @@ def _run_federated(
     return out
 
 
-# ==============================================================================
 # Full orchestrator — resume by default
-# ==============================================================================
 def run_all_experiments(
     cfg: Config,
     artifacts_path: Path,
@@ -517,25 +495,25 @@ def run_all_experiments(
         unknown = set(only_seeds) - set(seeds)
         assert not unknown, f"seeds not in config: {sorted(unknown)}"
         seeds = [s for s in seeds if s in set(only_seeds)]
-    assert variants and seeds, "❌ the experiment matrix is empty (variants/seeds)."
+    assert variants and seeds, "the experiment matrix is empty (variants/seeds)."
     total = len(variants) * len(seeds)
     done = sum(1 for r in runs.values() if r.get("status") == "completed")
-    logger.info(f"📊 start state: {done}/{total} runs already completed (resume by default).")
+    logger.info(f"start state: {done}/{total} runs already completed (resume by default).")
 
-    # --- config snapshot: built once and validated as JSON right here ---
+    # config snapshot: built once and validated as JSON right here
     try:
         snapshot = _jsonable(cfg.canonical_dict())
         json.dumps(snapshot)
     except Exception as exc:
-        logger.warning(f"⚠️ full config snapshot could not be serialized ({exc}); only the hash is saved.")
+        logger.warning(f"full config snapshot could not be serialized ({exc}); only the hash is saved.")
         snapshot = {"config_hash": cfg.config_hash()}
 
-    # --- raw data loaded once for the whole matrix (cache enabled) ---
+    # raw data loaded once for the whole matrix (cache enabled)
     raw = load_elliptic_raw(cfg.data)
     full_data = _first(preprocess_elliptic(raw, cfg.data))
     in_dim = int(full_data.x.shape[1])
     logger.info(
-        f"📦 global data ready: N={full_data.num_nodes:,} | "
+        f"global data ready: N={full_data.num_nodes:,} | "
         f"E={full_data.edge_index.shape[1]:,} | F={in_dim}"
     )
     bundle = {
@@ -548,22 +526,22 @@ def run_all_experiments(
         for seed in seeds:
             key = make_run_key(variant.name, seed)
             if runs.get(key, {}).get("status") == "completed" and cfg.experiment.resume:
-                logger.info(f"⏭️ skipping completed run: {key}")
+                logger.info(f"skipping completed run: {key}")
                 continue
 
-            logger.info(f"🚀 starting run: {key} ({done + 1}/{total})")
+            logger.info(f"starting run: {key} ({done + 1}/{total})")
             try:
                 art = run_single_experiment(cfg, variant, seed, bundle)
                 runs[key] = _jsonable(art)
                 done += 1
                 tm = art.get("test_metrics", {}) or {}
                 logger.info(
-                    f"✅ completed: {key} | val_ap={art.get('best_val_ap', float('nan')):.4f} | "
+                    f"completed: {key} | val_ap={art.get('best_val_ap', float('nan')):.4f} | "
                     f"test_ap={float(tm.get('ap', float('nan'))):.4f} | "
                     f"converged={art.get('converged')} | {art.get('runtime_sec')}s"
                 )
             except Exception as exc:
-                logger.error(f"❌ run failed: {key} — {exc}", exc_info=True)
+                logger.error(f"run failed: {key} — {exc}", exc_info=True)
                 runs[key] = {
                     "variant_name": variant.name,
                     "seed": seed,
@@ -578,9 +556,9 @@ def run_all_experiments(
                     "runs": runs, "config_snapshot": snapshot,
                     "config_hash": full_hash, "code_hash": code_hash})
             except Exception as exc:  # saving must never kill the whole matrix
-                logger.error(f"⚠️ saving artifacts failed: {exc}")
+                logger.error(f"saving artifacts failed: {exc}")
 
     n_ok = sum(1 for r in runs.values() if r.get("status") == "completed")
     n_bad = sum(1 for r in runs.values() if r.get("status") == "failed")
-    logger.info(f"🏁 matrix finished: {n_ok} completed, {n_bad} failed, out of {total}.")
+    logger.info(f"matrix finished: {n_ok} completed, {n_bad} failed, out of {total}.")
     return {"runs": runs}

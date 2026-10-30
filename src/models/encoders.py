@@ -1,12 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-encoders.py — GCN, GAT and MLP encoders
-==============================================================================
-All encoders share one interface, forward(x, edge_index) -> (node_emb, logits),
-so that build.py can attach the virtual-node layer and the classification
-head without special cases. node_emb is the hidden vector of the last layer
-(before classification); it is used both for class prototypes and for the
-virtual-node attention.
+"""GCN, GAT and MLP encoders with a common interface,
+forward(x, edge_index) -> (node_emb, logits). node_emb is the last hidden layer,
+used for class prototypes and virtual-node attention.
 """
 
 from __future__ import annotations
@@ -23,8 +18,8 @@ class GCNEncoder(nn.Module):
     """
     Multi-layer GCN encoder with dropout, LayerNorm and an optional residual
     connection between layers (disabled in all reported experiments).
-    
-    
+
+
     """
 
     def __init__(self, in_dim: int, cfg: ModelConfig, num_classes: int = 2):
@@ -142,5 +137,5 @@ def build_encoder(in_dim: int, cfg: ModelConfig, num_classes: int = 2) -> nn.Mod
     """Encoder factory selected by cfg.arch (\"gcn\", \"gat\" or \"mlp\")."""
     arch = cfg.arch.lower()
     if arch not in _ENCODER_REGISTRY:
-        raise ValueError(f"❌ unknown architecture: {arch}. Valid options: {list(_ENCODER_REGISTRY)}")
+        raise ValueError(f"unknown architecture: {arch}. Valid options: {list(_ENCODER_REGISTRY)}")
     return _ENCODER_REGISTRY[arch](in_dim, cfg, num_classes)

@@ -1,19 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-client.py — local training logic of each federated client
-==============================================================================
-Responsibilities of this module:
-  1) local training of the model on the client subgraph (local_epochs Adam steps)
-  2) computing each class's local prototype with a momentum update (basis of
-     the prototype-based variants)
-  3) computing prototype_loss against the global prototypes received from the server
-  4) handling the virtual-node payload exchange with the server
-  5) computing the client's participation score (selection_score), used by the
-     hard and soft selective aggregation in aggregation.py
-
-⚠️ Privacy note: none of the outputs of this module (state_dict, prototypes,
-virtual payload) contains raw feature vectors or node identifiers; they are
-model weights or class-level/boundary-level aggregate statistics.
+"""Federated client: local training on the client subgraph, class prototypes,
+prototype loss, virtual-node payload and the selection score used by the
+selective aggregation designs. Clients send model weights and class- or
+boundary-level statistics only.
 """
 
 from __future__ import annotations
@@ -36,9 +25,7 @@ from src.models.build import FedGNNModel, build_model
 logger = logging.getLogger("fedgnn.fed.client")
 
 
-# ==============================================================================
 # Output bundle of a client after one round of local training
-# ==============================================================================
 @dataclass
 class ClientUpdate:
     """
@@ -56,9 +43,7 @@ class ClientUpdate:
     metrics: Dict[str, float]                             # train_loss, val_ap, val_auc, ...
 
 
-# ==============================================================================
 # Federated client
-# ==============================================================================
 class FederatedClient:
     """
     An independent client with its model, local data, local prototypes and
@@ -118,7 +103,34 @@ class FederatedClient:
 
         self._pos_weight_tensor = self._compute_pos_weight_tensor()
 
-    # -------------------------------------------------------------- #
+        # optional split of the validation nodes (see
+        # FedConfig.val_split_weighting). The split uses its own generator with a
+        # fixed seed, so it does not touch the global random state and is the
+        # same for every training seed.
+        self.val_select_mask = self.data.val_mask
+        self.val_weight_mask = self.data.val_mask
+        if bool(getattr(fed_cfg, "val_split_weighting", False)):
+            self.val_weight_mask, self.val_select_mask = self._split_validation_mask()
+
+    VAL_SPLIT_SEED = 20261025
+
+    def _split_validation_mask(self):
+        """Stratified random halves of this client's validation nodes:
+        (mask used for the selection score, mask used for checkpoint selection)."""
+        vm = self.data.val_mask
+        idx = torch.nonzero(vm, as_tuple=False).flatten().cpu().numpy()
+        yv = self.data.y[vm].cpu().numpy()
+        rng = np.random.default_rng(self.VAL_SPLIT_SEED + int(self.client_id))
+        take = np.zeros(len(idx), dtype=bool)
+        for c in (0, 1):
+            ii = np.flatnonzero(yv == c)
+            rng.shuffle(ii)
+            take[ii[: (len(ii) + 1) // 2]] = True
+        weight_mask = torch.zeros_like(vm)
+        weight_mask[torch.as_tensor(idx[take], dtype=torch.long, device=vm.device)] = True
+        select_mask = vm & ~weight_mask
+        return weight_mask, select_mask
+
     def _compute_pos_weight_tensor(self) -> torch.Tensor:
         y_train = self.data.y[self.data.train_mask]
         n_pos = int((y_train == 1).sum().item())
@@ -129,7 +141,6 @@ class FederatedClient:
             pos_weight = min(n_neg / max(n_pos, 1), self.fed_cfg.max_pos_weight)
         return torch.tensor([1.0, pos_weight], device=self.device)
 
-    # -------------------------------------------------------------- #
     def _update_local_prototypes(
         self, node_emb: torch.Tensor, y: torch.Tensor, mask: torch.Tensor
     ):
@@ -148,7 +159,6 @@ class FederatedClient:
             else:
                 self.local_prototypes[c] = mean_emb.clone()
 
-    # -------------------------------------------------------------- #
     def _prototype_loss(
         self,
         node_emb: torch.Tensor,
@@ -190,7 +200,6 @@ class FederatedClient:
 
         return F.cross_entropy(sims, label_idx)
 
-    # -------------------------------------------------------------- #
     def _quick_eval(self, mask: torch.Tensor) -> Dict[str, float]:
         """
         Light local evaluation (AP/AUC). The final reported metrics come from
@@ -212,7 +221,6 @@ class FederatedClient:
         self.model.train()
         return {"ap": ap, "auc": auc}
 
-    # -------------------------------------------------------------- #
     def _compute_selection_score(self, val_metrics: Dict[str, float]) -> float:
         """
         Client participation score for hard/soft selective aggregation.
@@ -226,7 +234,25 @@ class FederatedClient:
         reliability = float(np.log1p(n_pos))
         return val_metrics["ap"] * reliability
 
-    # -------------------------------------------------------------- #
+    def evaluate_aggregate(self, state_dict, virtual_ref=None) -> Dict[str, float]:
+        """Validation AP/AUC of the aggregated model on this client's checkpoint-selection
+        nodes (FedConfig.select_on_aggregate). Works on a copy of the local model, so local
+        training and the random state are not affected."""
+        model = copy.deepcopy(self.model)
+        model.load_state_dict(state_dict)
+        if self.use_virtual_nodes and virtual_ref is not None:
+            model.set_virtual_reference(virtual_ref)
+        model.eval()
+        with torch.no_grad():
+            _, logits = model(self.data.x, self.data.edge_index, self.boundary_idx)
+            probs = F.softmax(logits, dim=-1)[:, 1]
+        y_true = self.data.y[self.val_select_mask].cpu().numpy()
+        y_score = probs[self.val_select_mask].cpu().numpy()
+        if len(np.unique(y_true)) < 2:
+            return {"ap": 0.0, "auc": 0.5}
+        return {"ap": float(average_precision_score(y_true, y_score)),
+                "auc": float(roc_auc_score(y_true, y_score))}
+
     def local_train(
         self,
         global_state_dict: Dict[str, torch.Tensor],
@@ -299,15 +325,18 @@ class FederatedClient:
             self._update_local_prototypes(node_emb.detach(), self.data.y, train_mask)
             last_loss = float(total_loss.item())
 
-        val_metrics = self._quick_eval(self.data.val_mask)
-        selection_score = self._compute_selection_score(val_metrics)
+        val_metrics = self._quick_eval(self.val_select_mask)
+        if self.val_weight_mask is self.val_select_mask:
+            selection_score = self._compute_selection_score(val_metrics)
+        else:
+            selection_score = self._compute_selection_score(self._quick_eval(self.val_weight_mask))
 
         class_counts = {
             c: int((self.data.y[train_mask] == c).sum().item())
             for c in torch.unique(self.data.y[train_mask]).tolist()
         }
 
-        # ── log L_align (tag distinguishes the first round from rounds with a reference) ──
+        # log L_align (the tag separates the first round from rounds with a reference)
         vloss_val = 0.0
         _vn_tag = "off"
         if self.use_virtual_nodes:
@@ -325,14 +354,14 @@ class FederatedClient:
                 f"[VNLOG] round={round_idx} client={self.client_id} "
                 f"L_align={vloss_val:.6e} tag={_vn_tag}"
             )
-        
-        # ── numerical guard on the outgoing payload: Tensor / dict / list, recursively ──
+
+        # replace non-finite values in the outgoing payload (tensor, dict or list)
         def _sanitize_payload(o, _path="payload"):
             if torch.is_tensor(o):
                 o = o.detach()
                 if not torch.isfinite(o).all():
                     logger.warning(
-                        f"⚠️ client {self.client_id}: {_path} non-finite, set to zero")
+                        f"client {self.client_id}: {_path} non-finite, set to zero")
                     o = torch.zeros_like(o)
                 return o
             if isinstance(o, dict):
@@ -342,45 +371,20 @@ class FederatedClient:
             if isinstance(o, tuple):
                 return tuple(_sanitize_payload(v, f"{_path}[{i}]") for i, v in enumerate(o))
             return o
-        
+
         virtual_payload_out = None
         _rvp = getattr(self, "raw_virtual_payload", None)
         if self.use_virtual_nodes and _rvp is not None:
             virtual_payload_out = _sanitize_payload(_rvp)
-            # ── optional payload protection (single application point, degrades gracefully) ──
-            _vc = (getattr(self, 'virtual_cfg', None)
-                   or getattr(getattr(self, 'cfg', None), 'virtual', None)
-                   or getattr(getattr(self.model, 'virtual_module', None), 'cfg', None))
-            _prot = str(getattr(_vc, 'protection', 'none') or 'none').lower()
-            self._payload_protection_applied = 'none'
-            if _prot not in ('none', 'off', ''):
-                _priv = None
-                for _m in ('src.models.virtual_nodes', 'src.fed.privacy',
-                           'src.privacy', 'src.fed.secure_agg'):
-                    try:
-                        _mod = __import__(_m, fromlist=['x'])
-                        _priv = getattr(_mod, 'privatize_virtual_payload', None)
-                        if _priv is not None: break
-                    except Exception: pass
-                if _priv is None:
-                    logger.warning(f'⚠️ privatize not found -> raw payload (protection={_prot})')
-                else:
-                    import inspect as _insp
-                    _sig = _insp.signature(_priv).parameters
-                    _kw = {}
-                    for _n, _v in (('cfg', _vc), ('virtual_cfg', _vc),
-                                   ('privacy_cfg', getattr(self, 'privacy_cfg', None)),
-                                   ('mode', _prot), ('protection', _prot),
-                                   ('client_id', self.client_id)):
-                        if _n in _sig and _v is not None: _kw[_n] = _v
-                    try:
-                        virtual_payload_out = _sanitize_payload(_priv(virtual_payload_out, **_kw))
-                        self._payload_protection_applied = _prot
-                    except Exception as _e:
-                        logger.warning(f'⚠️ privatize failed ({type(_e).__name__}: {_e}) -> raw payload')
+            # payload protection (virtual.protection); every reported configuration uses "none"
+            protection = str(getattr(self.virtual_cfg, "protection", "none") or "none").lower()
+            self._payload_protection_applied = "none"
+            if protection not in ("none", "off", ""):
+                logger.warning(f"payload protection '{protection}' is not applied to the "
+                               f"virtual-node payload; the raw payload is sent")
             if int(round_idx) == 1 and int(self.client_id) == 0:
-                logger.info(f'[VNLOG] protection_cfg={_prot} '
-                            f'applied={self._payload_protection_applied}')
+                logger.info(f"[VNLOG] protection_cfg={protection} "
+                            f"applied={self._payload_protection_applied}")
             if int(round_idx) == 1 and int(self.client_id) == 0:
                 _o = virtual_payload_out
                 if isinstance(_o, dict):
@@ -393,7 +397,7 @@ class FederatedClient:
                 logger.info(f"[VNLOG] payload_struct={_st}")
 
         logger.debug(
-            f"👤 client {self.client_id} | round {round_idx} | "
+            f"client {self.client_id} | round {round_idx} | "
             f"train_loss={last_loss:.4f} | val_ap={val_metrics['ap']:.4f} | "
             f"score={selection_score:.4f}"
         )

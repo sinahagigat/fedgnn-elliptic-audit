@@ -1,17 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-aggregation.py — server aggregation strategies
-==============================================================================
-Implements every strategy used by the variants:
+"""Server aggregation strategies.
 
-  • fedavg            → FedAvg                       (standard baseline)
-  • fedprox           → aggregated as FedAvg (the proximal term is applied in client.py)
-  • fedproto          → FedProto                     (+ global prototype aggregation)
-  • fedgnn_hard        → Hard selective aggregation  (top-k clients by score)
-  • fedgnn_soft        → Soft selective aggregation  (softmax score weighting)
-
-Virtual-node payload aggregation is independent of the strategy above and
-depends only on use_virtual_nodes.
+fedavg and fedprox: data-size weighted average (the proximal term is applied in
+client.py); fedproto: as fedavg, plus class-prototype averaging; fedgnn_hard:
+average of the top-k clients by selection score; fedgnn_soft: softmax(score/T)
+times data share. Virtual-node payloads are aggregated separately.
 """
 
 from __future__ import annotations
@@ -51,9 +44,7 @@ def _align_devices(*tensors):
 logger = logging.getLogger("fedgnn.fed.aggregation")
 
 
-# ==============================================================================
 # Model-weight aggregation: FedAvg / FedProx (weighted by num_train)
-# ==============================================================================
 def fedavg_aggregate(
     updates: List[ClientUpdate], selected_ids: Optional[List[int]] = None
 ) -> Dict[str, torch.Tensor]:
@@ -64,7 +55,7 @@ def fedavg_aggregate(
     """
     chosen = [u for u in updates if selected_ids is None or u.client_id in selected_ids]
     if not chosen:
-        raise ValueError("❌ no client selected for aggregation.")
+        raise ValueError("no client selected for aggregation.")
 
     total_n = sum(u.num_train for u in chosen)
     weights = [u.num_train / total_n for u in chosen]
@@ -80,9 +71,7 @@ def fedavg_aggregate(
     return agg_state
 
 
-# ==============================================================================
 # Global prototype aggregation: FedProto / Hard / Soft
-# ==============================================================================
 def fedproto_aggregate_prototypes(
     updates: List[ClientUpdate], selected_ids: Optional[List[int]] = None
 ) -> Dict[int, torch.Tensor]:
@@ -116,9 +105,7 @@ def fedproto_aggregate_prototypes(
     return global_prototypes
 
 
-# ==============================================================================
 # Hard selective aggregation
-# ==============================================================================
 def hard_selective_aggregate(
     updates: List[ClientUpdate], top_k_ratio: float
 ) -> Dict[str, torch.Tensor]:
@@ -135,15 +122,13 @@ def hard_selective_aggregate(
     selected_ids = [u.client_id for u in sorted_updates[:n_keep]]
 
     logger.info(
-        f"🎯 Hard-Selective: {n_keep}/{len(updates)} clients selected "
+        f"Hard-Selective: {n_keep}/{len(updates)} clients selected "
         f"(scores: {[round(u.selection_score, 3) for u in sorted_updates]})"
     )
     return fedavg_aggregate(updates, selected_ids=selected_ids)
 
 
-# ==============================================================================
 # Soft selective aggregation
-# ==============================================================================
 def soft_selective_aggregate(
     updates: List[ClientUpdate], temperature: float
 ) -> Dict[str, torch.Tensor]:
@@ -152,7 +137,7 @@ def soft_selective_aggregate(
     reduced by softmax(selection_score / temperature) but never set to zero,
     so every client keeps a share (full exclusion would harm federated
     fairness) while the influence of low-quality clients is limited.
-    
+
 
     final weight of each client = softmax(score/T) ⊙ (num_train / sum(num_train))
     renormalized to sum to 1, so that both quality (score) and data volume
@@ -171,7 +156,7 @@ def soft_selective_aggregate(
     combined /= combined.sum()
 
     logger.info(
-        f"🎯 Soft-Selective: final client weights = "
+        f"Soft-Selective: final client weights = "
         f"{[round(w, 4) for w in combined.tolist()]}"
     )
 
@@ -186,9 +171,7 @@ def soft_selective_aggregate(
     return agg_state
 
 
-# ==============================================================================
 # Virtual-node payload aggregation (independent of the main algorithm)
-# ==============================================================================
 def aggregate_virtual_payloads(
     updates: List[ClientUpdate],
 ) -> Optional[torch.Tensor]:

@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from jobs import JOBS  # noqa: E402
+from jobs import JOBS, LOCAL_FEATURE_EXPERIMENTS  # noqa: E402
 
 
 def main():
@@ -35,6 +35,15 @@ def main():
         return 2
 
     job = JOBS[args.job]
+    # protocol G uses 93 features; its data folder holds a marker file and its
+    # own graph cache, and no other protocol may use that folder
+    if args.data_dir:
+        local_only = (Path(args.data_dir) / "LOCAL_FEATURES_ONLY").is_file()
+        if (job["experiment"] in LOCAL_FEATURE_EXPERIMENTS) != local_only:
+            print(f"Job {args.job} cannot run with data folder {args.data_dir}: protocols G and L need "
+                  "the separate local-features folder made by tools/run_revision.py, "
+                  "and all other protocols need the normal data folder.")
+            return 2
     out = Path(args.results_root) / args.job
     out.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-u", str(ROOT / "main.py"),

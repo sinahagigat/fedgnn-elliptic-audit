@@ -8,16 +8,18 @@ authors:
   - family-names: Haghighat
     given-names: Sina
     affiliation: "Faculty of Electrical and Computer Engineering, University of Tabriz"
+    orcid: "https://orcid.org/0009-0004-6352-1409"
   - family-names: Balafar
     given-names: Mohammad Ali
     affiliation: "Faculty of Electrical and Computer Engineering, University of Tabriz"
     orcid: "https://orcid.org/0000-0001-5898-0871"
 preferred-citation:
   type: article
-  title: "When the partition picks the winner: a controlled variance audit of federated graph neural networks for illicit Bitcoin transaction detection"
+  title: "When the protocol picks the winner: a controlled variance audit of federated graph neural networks for illicit Bitcoin transaction detection"
   authors:
     - family-names: Haghighat
       given-names: Sina
+      orcid: "https://orcid.org/0009-0004-6352-1409"
     - family-names: Balafar
       given-names: Mohammad Ali
   status: submitted

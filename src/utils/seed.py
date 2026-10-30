@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-seed.py — full reproducibility control (determinism)
-================================================
-Seeds random, numpy, torch (CPU/GPU) and PyTorch Geometric in one place.
-Without it, two runs with the same configuration hash could produce different
-results, which would undermine any reproducibility claim.
-"""
+"""Seed random, numpy, torch and PyTorch Geometric for deterministic runs."""
 
 from __future__ import annotations
 

@@ -1,18 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-elliptic.py — loading and preprocessing of the Elliptic Bitcoin Transaction Graph dataset
-==============================================================================
-The output of this module is a single torch_geometric.data.Data object, regarded
-as the ground truth of the global graph; all later steps (federated partition,
-virtual nodes, training) are fed from this object.
+"""Load and preprocess the Elliptic Bitcoin transaction graph into one
+torch_geometric Data object.
 
-Anti-leakage notes:
-  1) the feature scaler is fitted only on TRAIN nodes (by time step).
-  2) split_mode="temporal" is the default: steps 1..34 -> train, 35..39 -> val,
-     40..49 -> test. This is the most common and most defensible protocol in
-     Elliptic papers and prevents temporal leakage.
-  3) if include_timestep_as_feature=False (default), the time-step column is
-     removed from the feature vector so that the model cannot read time directly.
+The temporal split is steps 1-34 train, 35-39 validation, 40-49 test. The
+feature scaler is fitted on training nodes only, and the time-step column is
+dropped from the features unless include_timestep_as_feature is set.
 """
 
 from __future__ import annotations
@@ -33,9 +25,7 @@ from src.config import DataConfig
 logger = logging.getLogger("fedgnn.data.elliptic")
 
 
-# ==============================================================================
 # 1) Loading the raw files
-# ==============================================================================
 def _load_raw_csvs(cfg: DataConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Load the three standard Elliptic files.
@@ -53,7 +43,7 @@ def _load_raw_csvs(cfg: DataConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Data
     for p in (feat_path, class_path, edge_path):
         if not p.exists():
             raise FileNotFoundError(
-                f"❌ data file not found: {p}\n"
+                f"data file not found: {p}\n"
                 f"Please place the raw Elliptic files in '{cfg.root}'."
             )
 
@@ -86,9 +76,7 @@ def _load_raw_csvs(cfg: DataConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Data
     return features_df, classes_df, edges_df
 
 
-# ==============================================================================
 # 2) Filtering to labelled nodes + re-indexing
-# ==============================================================================
 def _filter_and_reindex(
     features_df: pd.DataFrame,
     classes_df: pd.DataFrame,
@@ -111,7 +99,7 @@ def _filter_and_reindex(
     merged["y"] = merged["class"].map(label_map)
     if merged["y"].isna().any():
         n_bad = int(merged["y"].isna().sum())
-        logger.warning(f"⚠️ {n_bad} nodes with an unrecognized label found; they are removed.")
+        logger.warning(f"{n_bad} nodes with an unrecognized label found; they are removed.")
         merged = merged.dropna(subset=["y"]).reset_index(drop=True)
     merged["y"] = merged["y"].astype(int)
 
@@ -135,9 +123,7 @@ def _filter_and_reindex(
     return merged, edges_filtered, stats
 
 
-# ==============================================================================
 # 3) Building the final graph (Data)
-# ==============================================================================
 def _build_edge_index(edges_filtered: pd.DataFrame, num_nodes: int, cfg: DataConfig) -> torch.Tensor:
     """Build the final edge_index, applying make_undirected and remove_self_loops."""
     src = torch.tensor(edges_filtered["src"].values, dtype=torch.long)
@@ -174,7 +160,7 @@ def _select_feature_columns(merged: pd.DataFrame, cfg: DataConfig) -> list:
     if cfg.use_aggregated_features:
         selected += agg_cols
     if not selected:
-        raise ValueError("❌ at least one of use_local_features/use_aggregated_features must be True.")
+        raise ValueError("at least one of use_local_features/use_aggregated_features must be True.")
 
     if cfg.include_timestep_as_feature:
         selected = ["time_step"] + selected
@@ -205,9 +191,8 @@ def _make_random_masks(n: int, ratios: Tuple[float, float, float], seed: int) ->
 
 def _scale_features(x: np.ndarray, train_mask: np.ndarray, cfg: DataConfig) -> np.ndarray:
     """
-    Critical anti-leakage note: the scaler is fitted only on x[train_mask] and then
-    applied as a transform to the whole matrix. This prevents val/test statistics
-    (which are the 'future' in practice) from entering the train normalization.
+    The scaler is fitted on x[train_mask] only and then applied to the whole
+    matrix, so validation and test statistics do not enter the normalization.
     """
     if cfg.feature_scaling == "none":
         return x
@@ -220,20 +205,18 @@ def _scale_features(x: np.ndarray, train_mask: np.ndarray, cfg: DataConfig) -> n
 
 
 def _run_sanity_assertions(stats: dict, cfg: DataConfig) -> None:
-    """Fail fast: if the loaded counts differ substantially from the expectations
-    recorded in the config, the error is caught here, not 40 minutes later as a
-    strange metric."""
+    """Stop if the loaded node and edge counts differ from the expected counts in the config."""
     def _check(name, actual, expected, tol):
         if expected is None:
             return
         rel_diff = abs(actual - expected) / max(abs(expected), 1e-9)
         if rel_diff > tol:
             logger.warning(
-                f"⚠️ mismatch '{name}': actual value={actual}, expected={expected} "
+                f"mismatch '{name}': actual value={actual}, expected={expected} "
                 f"(relative difference={rel_diff:.3f} > tolerance={tol})."
             )
         else:
-            logger.info(f"✓ sanity check '{name}' passed: {actual} (expected≈{expected}).")
+            logger.info(f"sanity check '{name}' passed: {actual} (expected≈{expected}).")
 
     _check("num_nodes", stats["num_nodes"], cfg.expected_num_nodes, cfg.assert_tolerance)
     _check("num_edges_directed", stats["num_edges_directed_pre_undirected"],
@@ -241,9 +224,7 @@ def _run_sanity_assertions(stats: dict, cfg: DataConfig) -> None:
     _check("positive_rate", stats["positive_rate"], cfg.expected_positive_rate, cfg.assert_tolerance)
 
 
-# ==============================================================================
 # 4) Public entry point
-# ==============================================================================
 def load_elliptic_graph(cfg: DataConfig, seed: int = 42) -> Data:
     """
     Full loading, preprocessing and construction of the global Elliptic graph.
@@ -277,7 +258,7 @@ def load_elliptic_graph(cfg: DataConfig, seed: int = 42) -> Data:
         raise ValueError(f"unknown split_mode: {cfg.split_mode}")
 
     if train_mask.sum() == 0:
-        raise RuntimeError("❌ the train set is empty; check the temporal_train_end bounds.")
+        raise RuntimeError("the train set is empty; check the temporal_train_end bounds.")
 
     x_scaled = _scale_features(x_raw, train_mask, cfg)
 
@@ -312,7 +293,7 @@ def load_elliptic_graph(cfg: DataConfig, seed: int = 42) -> Data:
     _run_sanity_assertions(stats, cfg)
 
     logger.info(
-        f"✅ Elliptic graph built: N={n:,} | E_final={edge_index.shape[1]:,} | "
+        f"Elliptic graph built: N={n:,} | E_final={edge_index.shape[1]:,} | "
         f"F={x_scaled.shape[1]} | pos_rate={stats['positive_rate']:.4f} | "
         f"train/val/test = {train_mask.sum()}/{val_mask.sum()}/{test_mask.sum()}"
     )
@@ -330,23 +311,20 @@ def get_or_build_cached_graph(cfg: DataConfig, seed: int = 42, force_rebuild: bo
     cache_file = cache_dir / f"elliptic_graph_{cfg.split_mode}_seed{seed}.pt"
 
     if cache_file.exists() and not force_rebuild:
-        logger.info(f"📦 loading graph from cache: {cache_file}")
+        logger.info(f"loading graph from cache: {cache_file}")
         return torch.load(cache_file, weights_only=False)
 
     data = load_elliptic_graph(cfg, seed=seed)
     torch.save(data, cache_file)
-    logger.info(f"💾 graph saved to cache: {cache_file}")
+    logger.info(f"graph saved to cache: {cache_file}")
     return data
 
 
-# ==============================================================================
-# Compatibility layer with the src/train.py contract
-# ------------------------------------------------------------------------------
+# Entry points used by src/train.py
 # train.py expects a two-stage workflow (raw => preprocess). The actual implementation
 # of this project is single-stage: load_elliptic_graph does all the work (filtering, re-indexing,
 # building edge_index, feature selection, temporal masks, scaling on train).
 # These two functions only map names and add no new scientific logic.
-# ==============================================================================
 def load_elliptic_raw(cfg: DataConfig, seed: int = 42, force_rebuild: bool = False) -> Data:
     """Complete preprocessed graph (with cache). Equivalent to get_or_build_cached_graph."""
     return get_or_build_cached_graph(cfg, seed=seed, force_rebuild=force_rebuild)
@@ -355,8 +333,8 @@ def load_elliptic_raw(cfg: DataConfig, seed: int = 42, force_rebuild: bool = Fal
 def preprocess_elliptic(data: Data, cfg: DataConfig = None, seed: int = 42) -> Data:
     """
     Pass-through: preprocessing has already been done inside load_elliptic_graph.
-    This function only satisfies the train.py call contract and deliberately
-    applies no second transformation to the data (prevents double scaling).
+    It exists for the call in train.py and applies no second transformation
+    (which would scale the features twice).
     """
     for attr in ("x", "y", "edge_index", "train_mask", "val_mask", "test_mask"):
         assert hasattr(data, attr), f"[elliptic] graph is missing '{attr}'."

@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-common.py — shared helpers (single source of truth for seeding, atomic I/O and time)
-==============================================================================
-Every function needed by more than one module (seeding, atomic JSON read/write,
-commit hash, unique run keys) is defined here.
-train.py, main.py and analyze.py all use these helpers.
+"""Shared helpers: seeding, atomic JSON read/write, code and git fingerprints,
+run keys and timestamps.
 """
 
 from __future__ import annotations
@@ -25,9 +21,7 @@ import torch
 logger = logging.getLogger("fedgnn.utils.common")
 
 
-# ==============================================================================
-# Full reproducibility: single source of truth for seeding every RNG
-# ==============================================================================
+# Seeding of every random number generator
 def set_global_seed(seed: int, deterministic: bool = False) -> None:
     """
     Seed every RNG (random, numpy, torch CPU and CUDA).
@@ -95,9 +89,7 @@ def environment_info() -> Dict[str, Any]:
     return info
 
 
-# ==============================================================================
 # Time and run identifiers
-# ==============================================================================
 def utc_timestamp() -> str:
     """ISO-8601 timestamp in UTC (no time-zone ambiguity)."""
     return datetime.now(timezone.utc).isoformat()
@@ -105,19 +97,16 @@ def utc_timestamp() -> str:
 
 def make_run_key(variant_name: str, seed: int) -> str:
     """Unique key of each (variant, seed), used to index artifacts.json."""
-    assert variant_name, "❌ make_run_key: variant_name is empty."
+    assert variant_name, "make_run_key: variant_name is empty."
     return f"{variant_name}__seed{seed}"
 
 
-# ==============================================================================
 # Version information: commit hash for exact code reproducibility
-# ==============================================================================
 def get_git_commit_hash() -> Optional[str]:
     """
     Current git commit hash (if the project is inside a git repository). On
-    Colab there is usually no git repository; in that case the function
-    degrades gracefully and returns None, which is stored in the artifact as
-    "git_commit": null instead of an error that would stop the run.
+    Colab there is usually no git repository; the function then returns None,
+    stored in the run record as "git_commit": null.
     """
     try:
         result = subprocess.run(
@@ -126,13 +115,11 @@ def get_git_commit_hash() -> Optional[str]:
         )
         return result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        logger.debug("ℹ️ git commit hash not available (probably Colab without a git repo).")
+        logger.debug("git commit hash not available (probably Colab without a git repo).")
         return None
 
 
-# ==============================================================================
 # Atomic JSON I/O: protects files against a sudden Colab disconnect
-# ==============================================================================
 def load_json_if_exists(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     """
     If the file exists, return its content (basis of resume by default);
@@ -140,14 +127,14 @@ def load_json_if_exists(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     """
     path = Path(path)
     if not path.exists():
-        logger.info(f"ℹ️ file {path} does not exist — starting from the default state.")
+        logger.info(f"file {path} does not exist — starting from the default state.")
         return default
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError as exc:
         logger.error(
-            f"❌ file {path} is corrupt/incomplete ({exc}) — instead of crashing the whole project, "
+            f"file {path} is corrupt/incomplete ({exc}) — instead of crashing the whole project, "
             f"a backup {path}.corrupted is made and execution continues from the default state."
         )
         path.rename(path.with_suffix(path.suffix + ".corrupted"))

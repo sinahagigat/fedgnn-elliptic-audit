@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-metrics.py — evaluation metrics for fraud detection (imbalanced classes)
-==============================================================
-AP, ROC-AUC, F1, recall, precision, MCC, P@k and optimal-threshold selection.
-Model selection uses val_ap by default (config.py) because at a positive rate of
-about 9.76% accuracy and ROC-AUC alone are misleading.
+"""Metrics for imbalanced fraud detection: AP, ROC-AUC, F1, recall, precision,
+MCC, precision at k and threshold selection.
 """
 
 from __future__ import annotations

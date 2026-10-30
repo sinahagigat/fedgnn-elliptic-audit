@@ -1,13 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-server.py — server-side orchestrator for one variant and seed
-==============================================================================
-Main federated loop: broadcast global weights + prototypes + virtual reference,
-collect a ClientUpdate from every client, aggregate according to fed_cfg.algorithm,
-select the best checkpoint by validation AP, and detect convergence.
-
-The output of this module is passed to src/train.py, which evaluates the selected
-model on the test period.
+"""Federated server for one variant and seed: broadcast the global state, collect
+client updates, aggregate, select the best checkpoint by validation AP and apply
+the patience rule. src/train.py evaluates the selected model on the test period.
 """
 
 from __future__ import annotations
@@ -33,9 +27,7 @@ from src.fed.aggregation import (
 logger = logging.getLogger("fedgnn.fed.server")
 
 
-# ==============================================================================
 # History record of one round, for reporting and convergence detection
-# ==============================================================================
 @dataclass
 class RoundRecord:
     round_idx: int
@@ -46,9 +38,7 @@ class RoundRecord:
     selection_scores: Optional[Dict[int, float]] = None
 
 
-# ==============================================================================
 # Federated server
-# ==============================================================================
 class FederatedServer:
     """
     Orchestrator of one complete experiment (one variant on one seed): manages the
@@ -66,7 +56,7 @@ class FederatedServer:
         self.clients = clients
         self.fed_cfg = fed_cfg
 
-        # global state: single source of truth during federated training
+        # global state during federated training
         self.global_state_dict: Dict[str, torch.Tensor] = copy.deepcopy(initial_state_dict)
         self.global_prototypes: Optional[Dict[int, torch.Tensor]] = None
         self.global_virtual_ref: Optional[torch.Tensor] = None
@@ -77,10 +67,10 @@ class FederatedServer:
         self.best_round_idx: int = -1
 
         self.history: List[RoundRecord] = []
+        self.select_on_aggregate = bool(getattr(fed_cfg, "select_on_aggregate", False))
         self._rounds_without_improve: int = 0
         self.converged: bool = False
 
-    # -------------------------------------------------------------- #
     def _select_aggregation_fn(self, updates: List[ClientUpdate]) -> Dict[str, torch.Tensor]:
         """Select the weight-aggregation strategy from fed_cfg.algorithm."""
         algo = self.fed_cfg.algorithm
@@ -92,9 +82,8 @@ class FederatedServer:
         elif algo in ("fedavg", "fedprox", "fedproto"):
             return fedavg_aggregate(updates)
         else:
-            raise ValueError(f"❌ unknown aggregation algorithm: {algo}")
+            raise ValueError(f"unknown aggregation algorithm: {algo}")
 
-    # -------------------------------------------------------------- #
     def run_round(self, round_idx: int) -> RoundRecord:
         """
         Run one complete federated round:
@@ -114,21 +103,21 @@ class FederatedServer:
             )
             updates.append(update)
 
-        # --- weight aggregation (fail fast if no client returned an update) ---
-        assert len(updates) > 0, "❌ no ClientUpdate received from the clients."
+        # weight aggregation
+        assert len(updates) > 0, "no ClientUpdate received from the clients."
         self.global_state_dict = self._select_aggregation_fn(updates)
 
-        # --- global prototype aggregation ---
+        # global prototype aggregation
         if self.fed_cfg.algorithm in ("fedproto", "fedgnn_hard", "fedgnn_soft"):
             self.global_prototypes = fedproto_aggregate_prototypes(updates)
 
-        # --- virtual-node reference aggregation (independent of the main algorithm) ---
+        # virtual-node reference aggregation (independent of the main algorithm)
         if self.fed_cfg.use_virtual_nodes:
             new_ref = aggregate_virtual_payloads(updates)
             if new_ref is not None:
                 self.global_virtual_ref = new_ref
 
-        # --- aggregate the metrics reported for this round ---
+        # aggregate the metrics reported for this round
         avg_train_loss = float(np.mean([u.metrics["train_loss"] for u in updates]))
         avg_val_ap = float(np.mean([u.metrics["val_ap"] for u in updates]))
         avg_val_auc = float(np.mean([u.metrics["val_auc"] for u in updates]))
@@ -149,7 +138,14 @@ class FederatedServer:
         )
         self.history.append(record)
 
-        # --- best-checkpoint update (single criterion: validation AP) ---
+        # optional: select on the aggregated model (the model that is saved) instead
+        # of the local models; the history keeps the local value in avg_val_ap
+        if self.select_on_aggregate:
+            agg = [c.evaluate_aggregate(self.global_state_dict, self.global_virtual_ref) for c in self.clients]
+            avg_val_ap = float(np.mean([m["ap"] for m in agg]))
+            record.avg_val_ap_aggregate = avg_val_ap
+
+        # best-checkpoint update (single criterion: validation AP)
         improved = avg_val_ap > self.best_val_ap + self.fed_cfg.min_delta
         if improved:
             self.best_val_ap = avg_val_ap
@@ -159,12 +155,12 @@ class FederatedServer:
         else:
             self._rounds_without_improve += 1
 
-        # --- convergence detection (converged flag) ---
+        # convergence detection (converged flag)
         if self._rounds_without_improve >= self.fed_cfg.patience:
             self.converged = True
 
         logger.info(
-            f"🌐 server | round {round_idx}/{self.fed_cfg.num_rounds} | "
+            f"server | round {round_idx}/{self.fed_cfg.num_rounds} | "
             f"train_loss={avg_train_loss:.4f} | val_ap={avg_val_ap:.4f} | "
             f"best_val_ap={self.best_val_ap:.4f} @ round {self.best_round_idx} | "
             f"patience={self._rounds_without_improve}/{self.fed_cfg.patience} | "
@@ -173,7 +169,6 @@ class FederatedServer:
 
         return record
 
-    # -------------------------------------------------------------- #
     def run(self) -> Dict[str, object]:
         """
         Run up to num_rounds rounds with early stopping by patience. If the
@@ -184,7 +179,7 @@ class FederatedServer:
             self.run_round(round_idx)
             if self.converged and self.fed_cfg.early_stop_enabled:
                 logger.info(
-                    f"⏹️ early stop at round {round_idx}: no val_ap improvement "
+                    f"early stop at round {round_idx}: no val_ap improvement "
                     f"for {self.fed_cfg.patience} consecutive rounds."
                 )
                 break
@@ -199,7 +194,6 @@ class FederatedServer:
             "history": self.history,
         }
 
-    # -------------------------------------------------------------- #
     def get_best_model_state(self) -> Dict[str, torch.Tensor]:
         """Return the best weights found during federated training."""
         return self.best_state_dict

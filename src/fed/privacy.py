@@ -1,23 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-privacy.py — optional differential-privacy layer (not used in the reported experiments)
-==============================================================================
-⚠️ Scope: the mechanism implemented here is a standard Gaussian-mechanism
-approximation with naive (basic) composition of the epsilon budget, not an
-exact Rényi-DP or moments accountant. Any epsilon value it reports is an
-approximate monitor of relative noise, not a formal (ε,δ)-DP guarantee.
-The module is entirely optional: with privacy disabled no noise is added
-and the system behaves exactly as if the module did not exist.
+"""Optional differential-privacy helpers (not used in any reported experiment).
 
-
-
-Functions:
-  1) clip_tensor / clip_state_dict     — L2-norm clipping (prerequisite for noise)
-  2) add_gaussian_noise                — calibrated Gaussian noise
-  3) privatize_prototype               — privacy on a local prototype
-  4) privatize_virtual_payload         — privacy on the boundary payload
-  5) privatize_model_update            — privacy on the model-weight delta (light DP-FedAvg)
-  6) PrivacyAccountant                 — tracking of the consumed epsilon budget
+Gaussian mechanism with basic composition of the privacy budget; the reported
+epsilon is an approximate monitor, not a formal (epsilon, delta) guarantee.
+With privacy disabled no noise is added.
 """
 
 from __future__ import annotations
@@ -34,9 +20,7 @@ from src.config import PrivacyConfig
 logger = logging.getLogger("fedgnn.fed.privacy")
 
 
-# ==============================================================================
 # Clipping: mandatory prerequisite of any calibrated noise mechanism
-# ==============================================================================
 def clip_tensor(tensor: torch.Tensor, max_norm: float) -> torch.Tensor:
     """Clip the L2 norm of an arbitrary tensor to max_norm."""
     norm = torch.norm(tensor.detach(), p=2)
@@ -61,9 +45,7 @@ def clip_state_dict(
     return {k: v * scale for k, v in state_dict.items()}
 
 
-# ==============================================================================
 # Gaussian noise
-# ==============================================================================
 def add_gaussian_noise(
     tensor: torch.Tensor,
     noise_std: float,
@@ -76,9 +58,7 @@ def add_gaussian_noise(
     return tensor + noise
 
 
-# ==============================================================================
 # Privacy on the local prototype (before sending it to the server)
-# ==============================================================================
 def privatize_prototype(
     prototype: torch.Tensor,
     privacy_cfg: PrivacyConfig,
@@ -97,9 +77,7 @@ def privatize_prototype(
     return add_gaussian_noise(clipped, noise_std, generator)
 
 
-# ==============================================================================
 # Privacy on the virtual-node payload
-# ==============================================================================
 def privatize_virtual_payload(
     payload: Dict[str, torch.Tensor],
     privacy_cfg: PrivacyConfig,
@@ -117,9 +95,7 @@ def privatize_virtual_payload(
     return noised
 
 
-# ==============================================================================
 # Privacy on the model-weight delta (light DP-FedAvg); optional, costly in accuracy
-# ==============================================================================
 def privatize_model_update(
     local_state: Dict[str, torch.Tensor],
     global_state: Dict[str, torch.Tensor],
@@ -131,7 +107,7 @@ def privatize_model_update(
     add Gaussian noise, and rebuild the local weights as global + noisy delta,
     i.e. DP-FedAvg (McMahan et al., 2018) at the client level.
 
-    ⚠️ Not enabled in any reported experiment: its accuracy cost on the small,
+    Not enabled in any reported experiment: its accuracy cost on the small,
     imbalanced Elliptic data is considerable; it is kept only for a possible
     privacy sensitivity analysis.
 
@@ -153,9 +129,7 @@ def privatize_model_update(
     }
 
 
-# ==============================================================================
 # epsilon budget tracking (naive composition): relative monitoring only, no formal guarantee
-# ==============================================================================
 @dataclass
 class PrivacyAccountant:
     """
@@ -186,7 +160,7 @@ class PrivacyAccountant:
         self.total_epsilon_consumed += eps_round
         self.rounds_accounted += 1
         logger.debug(
-            f"🔒 PrivacyAccountant | round {self.rounds_accounted} | "
+            f"PrivacyAccountant | round {self.rounds_accounted} | "
             f"eps_round≈{eps_round:.4f} | eps_total≈{self.total_epsilon_consumed:.4f}"
         )
         return self.total_epsilon_consumed

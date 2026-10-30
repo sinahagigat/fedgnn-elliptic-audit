@@ -1,22 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-virtual_nodes.py — virtual-node layer (virtual-node alignment)
-==============================================================================
-Purpose: compensate for boundary edges cut by the partition, without exposing
-raw data of neighbouring nodes held by other clients.
+"""Virtual-node layer for boundary nodes.
 
-Mechanism:
-  1) each client has K learnable virtual nodes (num_virtual, default 8).
-  2) the virtual-node states are blended towards a reference computed by the
-     server from the clients' aggregated boundary payloads (see federated_dataset.
-     compute_boundary_exchange_payload), i.e. an anonymous summary of the outside.
-  3) every real boundary node (local_boundary_idx) attends, in addition to its
-     real intra-client neighbours, to the virtual nodes through a light
-     single-head attention block (instead of adding real edges to edge_index,
-     for simplicity and training stability).
-  4) virtual_node_loss is an MSE penalty between the virtual-node states (after
-     the local update) and the received reference, so that the virtual nodes do
-     not drift away from what they represent.
+Each client keeps K learnable virtual nodes (default 8). Their states are blended
+towards a server reference computed from the clients' aggregated boundary
+payloads. Boundary nodes attend to the virtual nodes through single-head
+attention, and an MSE term keeps the virtual-node states close to the reference.
 """
 
 from __future__ import annotations
@@ -65,7 +53,7 @@ class VirtualNodeModule(nn.Module):
         Implementation notes:
           (1) the consensus variable is defined in both branches.
           (2) the anchor is the pure server consensus, before momentum blending.
-          (3) shape, device and dtype of the input are normalized and checked (fail fast).
+          (3) shape, device and dtype of the input are normalized and checked.
         """
         if incoming_payload_matrix is None:
             self._last_reference_payload = None

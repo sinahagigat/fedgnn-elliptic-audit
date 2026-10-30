@@ -1,19 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-losses.py — shared loss functions (single source of truth for the formulas)
-==============================================================================
-Single source of truth: every loss formula used by more than one module
-(positive-class weight, prototype contrastive loss, virtual-node consistency
-loss) is defined here in canonical form, so that no formula is rewritten
-inconsistently elsewhere.
-
-
-Contents:
-  1) compute_pos_weight              — positive-class weight for cross-entropy
-  2) WeightedCrossEntropyLoss        — standard classification loss wrapper
-  3) FocalLoss                        — optional alternative for highly imbalanced data
-  4) PrototypeContrastiveLoss         — module version of the prototype loss
-  5) virtual_node_consistency_loss    — virtual-node consistency loss
+"""Loss functions shared by several modules: positive-class weight, weighted
+cross-entropy, focal loss, prototype contrastive loss and the virtual-node
+consistency loss.
 """
 
 from __future__ import annotations
@@ -28,10 +16,7 @@ import torch.nn.functional as F
 logger = logging.getLogger("fedgnn.losses")
 
 
-# ==============================================================================
-# 1) positive-class weight, single source (client.py._compute_pos_weight_tensor
-#    is logically equivalent; this is the reusable version)
-# ==============================================================================
+# 1) positive-class weight (client.py._compute_pos_weight_tensor computes the same value)
 def compute_pos_weight(
     y: torch.Tensor,
     mask: torch.Tensor,
@@ -51,16 +36,14 @@ def compute_pos_weight(
 
     if n_pos == 0:
         pos_weight = 1.0  # no positive example; weighting is meaningless
-        logger.debug("⚠️ compute_pos_weight: no positive example in the mask; weight=1.0")
+        logger.debug("compute_pos_weight: no positive example in the mask; weight=1.0")
     else:
         pos_weight = min(n_neg / max(n_pos, 1), max_pos_weight)
 
     return torch.tensor([1.0, pos_weight], dtype=torch.float32, device=dev)
 
 
-# ==============================================================================
 # 2) standard weighted cross-entropy wrapper
-# ==============================================================================
 class WeightedCrossEntropyLoss(nn.Module):
     """
     Stable wrapper around F.cross_entropy with a precomputed class weight.
@@ -79,9 +62,7 @@ class WeightedCrossEntropyLoss(nn.Module):
         return F.cross_entropy(logits, targets, weight=self.class_weight)
 
 
-# ==============================================================================
 # 3) Focal loss: optional alternative (for sensitivity analysis)
-# ==============================================================================
 class FocalLoss(nn.Module):
     """
     Focal loss (Lin et al., 2017) for cases where weighted CE alone is not
@@ -103,9 +84,7 @@ class FocalLoss(nn.Module):
         return focal.mean()
 
 
-# ==============================================================================
 # 4) Prototype contrastive loss: module version
-# ==============================================================================
 class PrototypeContrastiveLoss(nn.Module):
     """
     Module version of the contrastive formula between a node embedding and the
@@ -121,7 +100,7 @@ class PrototypeContrastiveLoss(nn.Module):
 
     def __init__(self, temperature: float):
         super().__init__()
-        assert temperature > 0, "❌ the prototype temperature must be positive."
+        assert temperature > 0, "the prototype temperature must be positive."
         self.temperature = temperature
 
     def forward(
@@ -158,9 +137,7 @@ class PrototypeContrastiveLoss(nn.Module):
         return F.cross_entropy(sims, label_idx)
 
 
-# ==============================================================================
 # 5) Virtual-node consistency loss: general version
-# ==============================================================================
 def virtual_node_consistency_loss(
     local_virtual_emb: torch.Tensor,
     global_virtual_ref: Optional[torch.Tensor],
@@ -178,9 +155,9 @@ def virtual_node_consistency_loss(
         return torch.tensor(0.0, device=local_virtual_emb.device)
 
     ref = global_virtual_ref.to(local_virtual_emb.device)
-    # fail fast if the local virtual-node dimension does not match the global reference
+    # the local virtual-node dimension must match the global reference
     assert local_virtual_emb.shape[-1] == ref.shape[-1], (
-        f"❌ virtual-node dimension mismatch: local={local_virtual_emb.shape[-1]}, "
+        f"virtual-node dimension mismatch: local={local_virtual_emb.shape[-1]}, "
         f"global reference={ref.shape[-1]}"
     )
     return F.mse_loss(local_virtual_emb.mean(dim=0), ref)

@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-io_utils.py — atomic writes + checkpoint/resume
-================================================
-Goal: a crash in run 17 of 18 must not send you back to run 1 (resume by default),
-and a half-written JSON file must never corrupt earlier artifacts (atomic writes).
-"""
+"""Atomic file writes and checkpoint/resume helpers."""
 
 from __future__ import annotations
 
@@ -17,9 +12,7 @@ from typing import Any, Dict, Optional
 import torch
 
 
-# ------------------------------------------------------------------------------
 # Atomic writes
-# ------------------------------------------------------------------------------
 def atomic_write_json(data: Dict[str, Any], path: str) -> None:
     """
     Write JSON atomically: write to a temporary file, then rename it
@@ -47,9 +40,7 @@ def load_json(path: str) -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
-# ------------------------------------------------------------------------------
 # Checkpoint / Resume
-# ------------------------------------------------------------------------------
 def run_signature(variant: str, seed: int, config_hash: str) -> str:
     """Unique identifier of one run."""
     return f"{variant}__seed{seed}__{config_hash}"

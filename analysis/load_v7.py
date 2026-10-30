@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from jobs import JOBS  # noqa: E402
+JOB_EXP = {job: spec["experiment"] for job, spec in JOBS.items()}
 V7 = RESULTS / "v7"
 
 
@@ -18,7 +21,8 @@ def _row(exp, r):
                best_val_ap=r["best_val_ap"], best_round=r["best_round_idx"],
                converged=bool(r["converged"]), rounds=r["total_rounds_run"],
                train_time=r.get("train_time_sec", np.nan), runtime=r.get("runtime_sec", np.nan),
-               config_hash=r["config_hash"], code_hash=r.get("code_hash"))
+               config_hash=r["config_hash"], code_hash=r.get("code_hash"),
+               best_round_local=r.get("best_round_local", np.nan))
     for key, pre in [("test_metrics_local", "loc_"), ("test_metrics_tuned", "tun_"),
                      ("test_metrics_local_tuned", "loctun_"), ("test_metrics_local_no_virtual", "locnv_")]:
         if key in r:
@@ -39,7 +43,7 @@ def load_v7():
         f = d / "artifacts_slim.json"
         if not f.is_file():
             continue
-        exp = d.name.split("_")[0] if d.name.startswith("C") else d.name[0]
+        exp = JOB_EXP.get(d.name, d.name)
         for r in json.loads(f.read_text())["runs"].values():
             rows.append(_row(exp, r))
     return pd.DataFrame(rows)

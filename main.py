@@ -1,16 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-main.py — entry point of the full pipeline (the only file run directly)
-==============================================================================
-Execution flow:
-  1) parse CLI arguments (config path, resume on/off, output path)
-  2) load and validate the Config (fail fast if the config is invalid)
-  3) run the full experiment matrix from train.py (resume by default)
-  4) produce the final report from analyze.py (tables + statistical tests + LaTeX)
-  5) print a human-readable summary to stdout
+"""Run an experiment matrix (variants x seeds) from a configuration file.
 
-Usage in Colab:
-    !python main.py --config configs/main_config.yaml --output-dir /content/results
+    python main.py --config configs/v7_A_louvain.yaml --data-dir data --output-dir runs/A1 --seeds 42-46
 """
 
 from __future__ import annotations
@@ -30,9 +21,7 @@ from src.analyze import generate_full_report
 from src.utils.common import ensure_dir
 
 
-# ==============================================================================
 # Unified logging set-up: the same format in every module
-# ==============================================================================
 def setup_logging(log_path: Path, verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     formatter = logging.Formatter(
@@ -44,23 +33,21 @@ def setup_logging(log_path: Path, verbose: bool = False) -> None:
     root_logger.setLevel(level)
     root_logger.handlers.clear()  # avoid duplicate handlers on re-runs
 
-  # --- console handler (live log in Colab) ---
+  # console handler (live log in Colab)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # --- file handler (kept for later inspection, even if Colab disconnects) ---
+    # file handler (kept for later inspection, even if Colab disconnects)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    root_logger.info(f"📝 logging initialised | level={logging.getLevelName(level)} | file={log_path}")
+    root_logger.info(f"logging initialised | level={logging.getLevelName(level)} | file={log_path}")
 
 
-# ==============================================================================
 # CLI argument parsing
-# ==============================================================================
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="FedGNN-Fraud v5.0.0 — run the full experiment matrix + final analysis"
@@ -108,10 +95,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# ==============================================================================
 # Main function
-# ==============================================================================
-# --- install the config-name compatibility layer (must run before any Config is built) ---
+# install the config-name compatibility layer (must run before any Config is built)
 from src.compat import install_config_compat, compat_report  # noqa: E402
 import src.config as _fedgnn_config_module  # noqa: E402
 install_config_compat(_fedgnn_config_module)
@@ -139,13 +124,13 @@ def main() -> int:
     logger = logging.getLogger("fedgnn.main")
 
     config_path = Path(args.config)
-    assert config_path.exists(), f"❌ config file not found: {config_path}"
+    assert config_path.exists(), f"config file not found: {config_path}"
 
     logger.info("=" * 70)
-    logger.info("🚀 starting FedGNN-Fraud v5.0.0")
-    logger.info(f"📄 config: {config_path}")
-    logger.info(f"💾 output: {output_dir}")
-    logger.info(f"📦 artifacts: {artifacts_path}")
+    logger.info("starting FedGNN-Fraud v5.0.0")
+    logger.info(f"config: {config_path}")
+    logger.info(f"output: {output_dir}")
+    logger.info(f"artifacts: {artifacts_path}")
     logger.info("=" * 70)
 
     try:
@@ -159,16 +144,16 @@ def main() -> int:
             torch.set_num_threads(int(args.threads))
             logger.info(f"torch threads = {torch.get_num_threads()}")
     except Exception as exc:
-        logger.error(f"❌ error while loading/validating the config — run stopped (fail fast): {exc}")
+        logger.error(f"invalid configuration, run stopped: {exc}")
         return 1
 
     logger.info(
-        f"📊 experiment matrix: {len(cfg.experiment.variants)} variants × "
+        f"experiment matrix: {len(cfg.experiment.variants)} variants × "
         f"{len(cfg.experiment.seeds)} seed = "
         f"{len(cfg.experiment.variants) * len(cfg.experiment.seeds)} runs in total."
     )
 
-    # --- stage 1: run the full experiment matrix (resume by default) ---
+    # stage 1: run the full experiment matrix (resume by default)
     only_seeds = _parse_seeds(args.seeds) if args.seeds else None
     only_variants = [v.strip() for v in args.variants.split(",")] if args.variants else None
     if only_seeds or only_variants:
@@ -176,14 +161,14 @@ def main() -> int:
     try:
         run_all_experiments(cfg, artifacts_path, only_seeds=only_seeds, only_variants=only_variants)
     except Exception as exc:
-        logger.error(f"❌ unexpected error while running the experiment matrix: {exc}", exc_info=True)
+        logger.error(f"unexpected error while running the experiment matrix: {exc}", exc_info=True)
         return 1
 
     if args.skip_analysis:
-        logger.info("⏭️ final analysis skipped (--skip-analysis). Run finished successfully.")
+        logger.info("final analysis skipped (--skip-analysis). Run finished successfully.")
         return 0
 
-    # --- stage 2: final analysis + tables/statistical tests/LaTeX ---
+    # stage 2: final analysis + tables/statistical tests/LaTeX
     try:
         report = generate_full_report(
             artifacts_path=artifacts_path,
@@ -192,16 +177,16 @@ def main() -> int:
         )
     except Exception as exc:
         logger.error(
-            f"❌ error in the final analysis stage — artifacts.json is complete "
+            f"error in the final analysis stage — artifacts.json is complete "
             f"and analyze.py can be run separately later: {exc}", exc_info=True
         )
         return 1
 
-    # --- final summary (robust to key-name differences in analyze.py) ---
+    # final summary
     logger.info("=" * 70)
-    logger.info("🏁 full run finished successfully.")
+    logger.info("full run finished successfully.")
     if isinstance(report, dict):
-        logger.info(f"🔑 report keys: {list(report.keys())}")
+        logger.info(f"report keys: {list(report.keys())}")
     df = report.get("summary_table") if isinstance(report, dict) else None
     if df is None and isinstance(report, dict):
         for k, v in report.items():
@@ -209,18 +194,18 @@ def main() -> int:
                 df = v
                 break
     if df is not None and hasattr(df, "head"):
-        logger.info("📋 summary table (first 3 rows):")
+        logger.info("summary table (first 3 rows):")
         for _, row in df.head(3).iterrows():
             logger.info("   • " + " | ".join(f"{c}={row[c]}" for c in df.columns))
     else:
-        logger.warning("⚠️ summary table not found — check the output of analyze.py.")
+        logger.warning("summary table not found — check the output of analyze.py.")
     stat = None
     if isinstance(report, dict):
         stat = report.get("statistical_comparison") or report.get("comparisons")
     if isinstance(stat, dict):
         sig = stat.get("significant_after_holm")
-        logger.info(f"📈 significant after Holm (vs {args.baseline}): {sig or 'none'}")
-    logger.info(f"📂 all outputs in: {output_dir}")
+        logger.info(f"significant after Holm (vs {args.baseline}): {sig or 'none'}")
+    logger.info(f"all outputs in: {output_dir}")
     compat_report()
     logger.info("=" * 70)
 

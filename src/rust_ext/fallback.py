@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-fallback.py — vectorized numpy implementation of the boundary-node computation
-==============================================================================
-Replaces the pure Python loop in federated_dataset._compute_boundary_info
-with vectorized numpy operations: O(E) with a much smaller constant than the
-interpreted loop (for the 73 thousand arcs of Elliptic it runs in a few milliseconds).
+"""Vectorized numpy computation of boundary nodes, O(E); a few milliseconds
+for the arcs of the labelled Elliptic subgraph.
 """
 
 from __future__ import annotations

@@ -1,13 +1,15 @@
 # Environment of the reported runs (recorded in every run record):
-# Python 3.14.6, CPU only, torch.use_deterministic_algorithms(True).
+# Python 3.14.6, CPU only, torch.use_deterministic_algorithms(True),
+# 4 torch threads per process (--threads 4).
+# Verified bit-identical reproduction of protocols A, V and Z with exactly
+# these versions. networkx must be <= 3.6.1: networkx 3.7 returns different
+# Louvain communities for the same seed, which changes every client partition.
 torch==2.14.1
 torch-geometric==2.8.1
-
-# Versions used to run the analysis scripts in analysis/.
-numpy==2.5.3
-scipy==1.18.1
-pandas==3.0.5
+networkx==3.6.1
+numpy==2.4.6
+pandas==3.0.3
 scikit-learn==1.9.1
-networkx==3.7
+scipy==1.18.1
 matplotlib==3.11.2
 PyYAML==6.0.3

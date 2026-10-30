@@ -1,21 +1,8 @@
 
 # -*- coding: utf-8 -*-
-"""
-rust_ext — optional Rust accelerator for computing boundary nodes
-==============================================================================
-Why this module? The Python loop in federated_dataset._compute_boundary_info
-could become a bottleneck on graphs larger than Elliptic (future scaling).
-This package provides an extension point:
-
-  1) try to import a compiled Rust (PyO3) extension named
-     `fedgnn_rust`, if it has been built and installed (it is not needed in
-     the current environment).
-  2) otherwise, degrade gracefully to the vectorized numpy implementation
-     in fallback.py, which is fast enough for the size of Elliptic
-     (about 46 thousand nodes).
-
-As a result the project never crashes because a Rust toolchain is missing; it only
-emits an informational log message.
+"""Boundary-node computation: uses the compiled extension fedgnn_rust if it is
+installed, otherwise the numpy implementation in fallback.py (fast enough for
+Elliptic; all reported runs used it).
 """
 
 from __future__ import annotations
@@ -29,11 +16,11 @@ _BACKEND = "fallback"
 try:
     import fedgnn_rust as _rust_backend  # type: ignore
     _BACKEND = "rust"
-    logger.info("🦀 Rust extension (fedgnn_rust) loaded — using the fast backend.")
+    logger.info("Rust extension (fedgnn_rust) loaded — using the fast backend.")
 except ImportError:
     from src.rust_ext.fallback import compute_boundary_fast as _rust_backend_compute_boundary_fallback
     logger.info(
-        "ℹ️ Rust extension not found; using the vectorized numpy fallback "
+        "Rust extension not found; using the vectorized numpy fallback "
         "(fully sufficient for the current dataset size)."
     )
 

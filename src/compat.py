@@ -1,16 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-compat.py — compatibility bridge between attribute names used by consumer code and the actual config fields.
-==============================================================================
-Problem: modules such as virtual_nodes.py and privacy.py access attributes with the
-section prefix (cfg.virtual_momentum) while the config class defines them without the
-prefix (momentum). This file installs a fallback __getattr__ on the config classes
-that maps the requested name to the actual field.
+"""Attribute aliases for the configuration classes.
 
-⚠️ This is a temporary bridge, not a final solution. Every mapping is logged as a
-WARNING; the same mappings should eventually be applied as permanent renames in the
-code so that the single-source-of-truth principle is not left violated. The function
-compat_report() prints the full list of mappings used, for that purpose.
+Some modules read prefixed names (cfg.virtual_momentum) for fields that the
+configuration classes define without the prefix (momentum). install_config_compat
+adds a __getattr__ fallback that maps such names to the actual field and logs
+each mapping once; compat_report() lists the mappings used.
 """
 
 from __future__ import annotations
@@ -40,20 +34,20 @@ _AFFIXES = ("num_", "n_", "use_", "enable_", "is_", "do_", "with_")
 # Explicit mappings for cases where a structural guess is not enough.
 # Order matters: the first name that exists in the class is chosen.
 _EXPLICIT: Dict[str, List[str]] = {
-    # --- VirtualNodeConfig ---
+    # VirtualNodeConfig
     "num_virtual_nodes":      ["num_nodes", "n_nodes", "num_virtual", "n_virtual", "count"],
     "virtual_momentum":       ["momentum", "ema_momentum", "update_momentum"],
     "virtual_residual_weight":["residual_weight", "alpha", "mix_weight", "beta"],
     "virtual_loss_weight":    ["loss_weight", "lambda_virtual", "weight"],
     "virtual_temperature":    ["temperature", "tau"],
-    # --- PrivacyConfig ---
+    # PrivacyConfig
     "enabled":                ["enable", "enable_dp", "use_dp", "dp_enabled", "active"],
     "clip_norm":              ["dp_clip_norm", "max_grad_norm", "grad_clip_norm",
                                "l2_clip", "clipping_norm"],
     "noise_multiplier":       ["dp_noise_multiplier", "sigma", "noise_std", "noise_sigma"],
     "delta":                  ["dp_delta", "target_delta"],
     "epsilon":                ["dp_epsilon", "target_epsilon"],
-    # --- ModelConfig ---
+    # ModelConfig
     "use_residual":           ["residual"],
     "residual":               ["use_residual"],
     "hidden":                 ["hidden_dim"],
@@ -61,9 +55,7 @@ _EXPLICIT: Dict[str, List[str]] = {
 }
 
 
-# ==============================================================================
 # Extract the actual fields of a config object (pydantic v2 / dataclass / plain)
-# ==============================================================================
 def _field_names(obj: Any) -> List[str]:
     cls = type(obj)
     names: Set[str] = set()
@@ -83,9 +75,7 @@ def _field_names(obj: Any) -> List[str]:
     return sorted(names)
 
 
-# ==============================================================================
 # Generate mapping candidates: deterministic and inspectable
-# ==============================================================================
 def _candidates(name: str) -> List[str]:
     out: List[str] = []
 
@@ -150,9 +140,7 @@ def _resolve(obj: Any, requested: str) -> Optional[str]:
     return None
 
 
-# ==============================================================================
 # Install the fallback __getattr__
-# ==============================================================================
 def _make_fallback(cls_name: str, original):
     def __getattr__(self, item):                      # only when normal lookup fails
         if item.startswith("_") or item in ("model_fields", "model_config",
@@ -168,7 +156,7 @@ def _make_fallback(cls_name: str, original):
             if key not in _ANNOUNCED:
                 _ANNOUNCED.add(key)
                 logger.warning(
-                    f"🔗 compatibility mapping: {cls_name}.{item} → {cls_name}.{target} "
+                    f"compatibility mapping: {cls_name}.{item} → {cls_name}.{target} "
                     f"(rename it in the code before final release)"
                 )
             return object.__getattribute__(self, target)
@@ -203,7 +191,7 @@ def install_config_compat(config_module) -> int:
         obj.__getattr__ = _make_fallback(name, original)
         obj._fedgnn_compat_installed = True
         n += 1
-    logger.info(f"🧩 config compatibility layer installed on {n} classes.")
+    logger.info(f"config compatibility layer installed on {n} classes.")
     return n
 
 
@@ -211,19 +199,17 @@ def compat_report() -> Dict[str, str]:
     """List of the mappings actually used; these are the ones to make permanent."""
     if _RESOLVED:
         logger.info("=" * 70)
-        logger.info(f"🧩 {len(_RESOLVED)} compatibility mappings used in this run:")
+        logger.info(f"{len(_RESOLVED)} compatibility mappings used in this run:")
         for k, v in sorted(_RESOLVED.items()):
             cls = k.split(".")[0]
             logger.info(f"   • {k}  →  {cls}.{v}")
         logger.info("=" * 70)
     else:
-        logger.info("✅ no compatibility mapping needed; names are aligned.")
+        logger.info("no compatibility mapping needed; names are aligned.")
     return dict(_RESOLVED)
 
 
-# ==============================================================================
 # Robust model call: reads the name of forward's third parameter from its signature
-# ==============================================================================
 _FWD_CACHE: Dict[type, Optional[str]] = {}
 
 

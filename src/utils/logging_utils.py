@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-logging_utils.py — structured logging (file + console)
-==================================================
-One logger per (variant, seed) whose file name contains the configuration hash, so
-that every log line can be traced to the run that produced it.
+"""Logging to file and console; one log file per variant and seed, named with
+the configuration hash.
 """
 
 from __future__ import annotations

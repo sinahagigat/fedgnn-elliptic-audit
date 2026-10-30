@@ -1,17 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-stats.py — statistical testing layer (single source of truth for variant comparisons)
-==============================================================================
-Goal: no statistical formula (Holm-Bonferroni, TOST, Wilcoxon, Cohen's d) may be
-rewritten inline in analyze.py or anywhere else.
-
-⚠️ Statistical honesty: with only 3 seeds per variant, the statistical power of
-parametric tests is very limited. This module provides both the paired
-t-test and the non-parametric Wilcoxon test, and the output of both explicitly
-carries a small-n warning. With few seeds these tests should be presented as
-an indication of the direction of an effect, not as definitive proof of
-superiority; a strong significance claim with n=3 would not be defensible, and
-stating this limitation openly belongs in the Limitations section.
+"""Paired tests for comparing variants: paired t-test, Wilcoxon signed-rank,
+Holm-Bonferroni correction, TOST equivalence and Cohen's d. Results carry a
+warning when the number of seeds is small.
 """
 
 from __future__ import annotations
@@ -29,9 +19,7 @@ logger = logging.getLogger("fedgnn.stats")
 MIN_RECOMMENDED_N = 5  # below this number of seeds, a statistical-power warning is issued
 
 
-# ==============================================================================
 # Effect size — Cohen's d for paired samples
-# ==============================================================================
 def cohens_d_paired(a: Sequence[float], b: Sequence[float]) -> float:
     """
     Standard effect size for paired samples: d = mean(diff) / std(diff).
@@ -40,7 +28,7 @@ def cohens_d_paired(a: Sequence[float], b: Sequence[float]) -> float:
     which becomes unstable for small n.
     """
     a_arr, b_arr = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-    assert a_arr.shape == b_arr.shape, "❌ cohens_d_paired: the two samples must have equal length."
+    assert a_arr.shape == b_arr.shape, "cohens_d_paired: the two samples must have equal length."
     diff = a_arr - b_arr
     std_diff = float(np.std(diff, ddof=1)) if len(diff) > 1 else 0.0
     if std_diff == 0.0:
@@ -61,9 +49,7 @@ def interpret_cohens_d(d: float) -> str:
         return "large"
 
 
-# ==============================================================================
 # Paired comparison — parametric t-test and non-parametric Wilcoxon, together
-# ==============================================================================
 @dataclass
 class PairwiseComparisonResult:
     metric_name: str
@@ -97,9 +83,9 @@ def paired_comparison(
     only on Cohen's d and the mean.
     """
     a_arr, b_arr = np.asarray(scores_a, dtype=float), np.asarray(scores_b, dtype=float)
-    assert a_arr.shape == b_arr.shape, "❌ paired_comparison: the two score vectors differ in length."
+    assert a_arr.shape == b_arr.shape, "paired_comparison: the two score vectors differ in length."
     n = len(a_arr)
-    assert n >= 2, "❌ paired_comparison: at least 2 seeds are required for any paired test."
+    assert n >= 2, "paired_comparison: at least 2 seeds are required for any paired test."
 
     t_stat, t_pvalue = scipy_stats.ttest_rel(a_arr, b_arr)
 
@@ -108,12 +94,12 @@ def paired_comparison(
         try:
             wilcoxon_stat, wilcoxon_pvalue = scipy_stats.wilcoxon(a_arr, b_arr)
         except ValueError as exc:
-            logger.warning(f"⚠️ Wilcoxon could not be computed ({variant_a} vs {variant_b}): {exc}")
+            logger.warning(f"Wilcoxon could not be computed ({variant_a} vs {variant_b}): {exc}")
 
     d = cohens_d_paired(a_arr, b_arr)
     low_power = n < MIN_RECOMMENDED_N
     note = (
-        f"⚠️ n={n} seeds — limited statistical power; the p-value should only be "
+        f"n={n} seeds — limited statistical power; the p-value should only be "
         f"read as an indication of effect direction, not as proof of superiority."
         if low_power else ""
     )
@@ -137,9 +123,7 @@ def paired_comparison(
     )
 
 
-# ==============================================================================
 # Multiple-comparison correction — Holm-Bonferroni (step-down, less conservative than plain Bonferroni)
-# ==============================================================================
 @dataclass
 class HolmCorrectionResult:
     original_pvalues: List[float]
@@ -164,7 +148,7 @@ def holm_bonferroni_correction(
     small); this is exactly the correct behaviour of the Holm procedure.
     """
     m = len(p_values)
-    assert m >= 1, "❌ holm_bonferroni_correction: at least one p-value is required."
+    assert m >= 1, "holm_bonferroni_correction: at least one p-value is required."
 
     indexed = sorted(enumerate(p_values), key=lambda x: x[1])
     sorted_indices = [idx for idx, _ in indexed]
@@ -197,9 +181,7 @@ def holm_bonferroni_correction(
     )
 
 
-# ==============================================================================
 # TOST — two one-sided equivalence tests; to show that "the difference is negligible"
-# ==============================================================================
 @dataclass
 class TOSTResult:
     mean_diff: float
@@ -236,8 +218,8 @@ def tost_equivalence_test(
     a_arr, b_arr = np.asarray(scores_a, dtype=float), np.asarray(scores_b, dtype=float)
     diff = a_arr - b_arr
     n = len(diff)
-    assert n >= 2, "❌ tost_equivalence_test: at least 2 seeds are required."
-    assert equivalence_margin > 0, "❌ tost_equivalence_test: the margin must be positive."
+    assert n >= 2, "tost_equivalence_test: at least 2 seeds are required."
+    assert equivalence_margin > 0, "tost_equivalence_test: the margin must be positive."
 
     mean_diff = float(np.mean(diff))
     std_diff = float(np.std(diff, ddof=1)) if n > 1 else 1e-12
@@ -254,7 +236,7 @@ def tost_equivalence_test(
     equivalent = p_tost < alpha
 
     note = (
-        f"⚠️ n={n} seeds — a TOST result with a small sample must be read with "
+        f"n={n} seeds — a TOST result with a small sample must be read with "
         f"care; margin={equivalence_margin} was chosen by hand on the basis of "
         f"practical (not statistical) importance."
     )
@@ -266,9 +248,7 @@ def tost_equivalence_test(
     )
 
 
-# ==============================================================================
 # High-level orchestrator — all paired comparisons of one metric with one Holm correction
-# ==============================================================================
 def compare_all_variants_vs_baseline(
     variant_scores: Dict[str, List[float]],
     baseline_name: str,
@@ -281,7 +261,7 @@ def compare_all_variants_vs_baseline(
     comparison on its own), as expected for a statistical-significance section
     of a paper.
     """
-    assert baseline_name in variant_scores, f"❌ baseline '{baseline_name}' is not in variant_scores."
+    assert baseline_name in variant_scores, f"baseline '{baseline_name}' is not in variant_scores."
     baseline_scores = variant_scores[baseline_name]
 
     comparisons: List[PairwiseComparisonResult] = []

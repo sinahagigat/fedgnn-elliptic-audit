@@ -1,13 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-build.py — factory that builds the complete model of each variant
-==============================================================================
-Every variant (Centralized_GCN, FedAvg_GCN, FedProto_GCN, FedGNN_Hard_GCN,
-FedGNN_SoftSelective_GCN, FedGNN_SoftSelective_Virtual_GCN,
-FedGNN_SoftSelective_Virtual_GAT, ...) is built from the same FedGNNModel;
-variants differ in training/aggregation, not in the network architecture
-(apart from the encoder type), so that comparisons are like-for-like and
-performance differences can be attributed to the federated algorithm.
+"""Model factory. Every design uses the same FedGNNModel (encoder, optional
+virtual-node layer, linear head); designs differ in training and aggregation
+and, for Soft-VN-GAT, in the encoder.
 """
 
 from __future__ import annotations
@@ -30,7 +24,7 @@ class FedGNNModel(nn.Module):
     Complete model of one client (or of the centralized version): GCN/GAT/MLP
     encoder, optionally followed by the virtual-node layer.
 
-    Design note: the final logits are computed from node_emb *after* the
+    The final logits are computed from node_emb *after* the
     virtual-node layer (when enabled), so the virtual nodes do affect the
     classification of boundary nodes whenever boundary indices are passed.
     """
@@ -115,7 +109,7 @@ def build_model(
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        f"🧠 model built | arch={model_cfg.arch} | virtual_nodes={use_virtual_nodes} | "
+        f"model built | arch={model_cfg.arch} | virtual_nodes={use_virtual_nodes} | "
         f"parameters={n_params:,} | device={device}"
     )
     return model

@@ -1,14 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-analyze.py — tables and final report from artifacts.json for the paper
-==============================================================================
-Responsibilities:
-  1) load artifacts.json and keep only runs with status="completed"
-  2) build the summary table (mean ± std over seeds) for every variant × metric
-  3) report the converged status (how many of N runs converged)
-  4) statistical comparison of all variants against the baseline (with stats.py)
-  5) output both CSV/JSON (for manual inspection) and LaTeX table text (for
-     direct inclusion in the paper)
+"""Summary tables and paired tests from an artifacts.json file (completed runs only).
+Used for quick checks; the article's numbers come from analysis/build_numbers.py.
 """
 
 from __future__ import annotations
@@ -28,19 +20,17 @@ logger = logging.getLogger("fedgnn.analyze")
 METRICS_OF_INTEREST = ["ap", "auc", "f1", "precision", "recall"]
 
 
-# ==============================================================================
 # Loading and filtering artifacts
-# ==============================================================================
 def load_completed_runs(artifacts_path: Path) -> Dict[str, dict]:
-    assert artifacts_path.exists(), f"❌ artifacts file not found: {artifacts_path}"
+    assert artifacts_path.exists(), f"artifacts file not found: {artifacts_path}"
     with open(artifacts_path, "r", encoding="utf-8") as f:
         artifacts = json.load(f)
     runs = artifacts.get("runs", {})
     completed = {k: v for k, v in runs.items() if v.get("status") == "completed"}
     failed = {k: v for k, v in runs.items() if v.get("status") == "failed"}
     if failed:
-        logger.warning(f"⚠️ {len(failed)} runs with status='failed' were excluded from the analysis: {list(failed.keys())}")
-    logger.info(f"📊 {len(completed)} completed runs loaded for analysis.")
+        logger.warning(f"{len(failed)} runs with status='failed' were excluded from the analysis: {list(failed.keys())}")
+    logger.info(f"{len(completed)} completed runs loaded for analysis.")
     return completed
 
 
@@ -51,9 +41,7 @@ def group_runs_by_variant(completed_runs: Dict[str, dict]) -> Dict[str, List[dic
     return grouped
 
 
-# ==============================================================================
 # Summary table — mean ± std over seeds for every metric
-# ==============================================================================
 def build_summary_table(grouped_runs: Dict[str, List[dict]]) -> pd.DataFrame:
     """
     Build a DataFrame with one row per variant, containing the mean/std of every
@@ -81,9 +69,7 @@ def build_summary_table(grouped_runs: Dict[str, List[dict]]) -> pd.DataFrame:
     return df
 
 
-# ==============================================================================
 # Convergence report — full transparency on runs that did not reach converged=True
-# ==============================================================================
 def convergence_report(grouped_runs: Dict[str, List[dict]]) -> pd.DataFrame:
     rows = []
     for variant_name, runs in grouped_runs.items():
@@ -100,22 +86,20 @@ def convergence_report(grouped_runs: Dict[str, List[dict]]) -> pd.DataFrame:
     n_not_converged = int((~df["converged"]).sum())
     if n_not_converged > 0:
         logger.warning(
-            f"⚠️ {n_not_converged}/{len(df)} runs recorded with converged=False; "
-            f"this must be reported honestly in the paper text (not only in an appendix)."
+            f"{n_not_converged}/{len(df)} runs recorded with converged=False; "
+            f"report this alongside the results."
         )
     return df
 
 
-# ==============================================================================
 # Statistical comparison of all variants against the baseline
-# ==============================================================================
 def run_statistical_comparisons(
     grouped_runs: Dict[str, List[dict]],
     baseline_name: str,
     metric: str = "ap",
     alpha: float = 0.05,
 ) -> Dict[str, object]:
-    assert baseline_name in grouped_runs, f"❌ baseline '{baseline_name}' is not in the results."
+    assert baseline_name in grouped_runs, f"baseline '{baseline_name}' is not in the results."
 
     variant_scores: Dict[str, List[float]] = {}
     for variant_name, runs in grouped_runs.items():
@@ -126,7 +110,7 @@ def run_statistical_comparisons(
     seed_counts = {v: len(s) for v, s in variant_scores.items()}
     if len(set(seed_counts.values())) > 1:
         logger.warning(
-            f"⚠️ seed counts differ between variants {seed_counts}; the paired "
+            f"seed counts differ between variants {seed_counts}; the paired "
             f"comparison is meaningful only on the common subset of seeds."
         )
         min_n = min(seed_counts.values())
@@ -135,7 +119,7 @@ def run_statistical_comparisons(
     n_min = min((len(v) for v in variant_scores.values()), default=0)
     if n_min < 2:
         logger.warning(
-            f"⚠️ paired tests skipped: minimum seed count = {n_min} (required: 2). "
+            f"paired tests skipped: minimum seed count = {n_min} (required: 2). "
             f"This is normal for a smoke test; a full run with ≥3 seeds executes them."
         )
         return {"skipped": True, "reason": f"n_seeds={n_min} < 2", "comparisons": {}}
@@ -154,7 +138,7 @@ def run_ablation_equivalence_check(
     meaningful performance difference, through TOST between
     FedGNN_SoftSelective_GCN (without virtual nodes) and FedGNN_SoftSelective_Virtual_GCN.
     """
-    assert variant_a in grouped_runs and variant_b in grouped_runs, "❌ both variants must be present in the results."
+    assert variant_a in grouped_runs and variant_b in grouped_runs, "both variants must be present in the results."
     scores_a = sorted(grouped_runs[variant_a], key=lambda r: r["seed"])
     scores_b = sorted(grouped_runs[variant_b], key=lambda r: r["seed"])
     n = min(len(scores_a), len(scores_b))
@@ -168,9 +152,7 @@ def run_ablation_equivalence_check(
     }
 
 
-# ==============================================================================
 # LaTeX output — for direct inclusion in the paper
-# ==============================================================================
 def dataframe_to_latex_table(df: pd.DataFrame, caption: str, label: str) -> str:
     """Standard booktabs LaTeX table, compatible with most journal templates."""
     cols_to_show = ["variant", "ap_mean", "ap_std", "auc_mean", "auc_std", "f1_mean", "f1_std", "n_seeds"]
@@ -183,9 +165,7 @@ def dataframe_to_latex_table(df: pd.DataFrame, caption: str, label: str) -> str:
     )
 
 
-# ==============================================================================
 # Final orchestrator — one function, full analysis output
-# ==============================================================================
 def generate_full_report(
     artifacts_path: Path,
     output_dir: Path,
@@ -195,12 +175,12 @@ def generate_full_report(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     completed = load_completed_runs(artifacts_path)
-    assert len(completed) > 0, "❌ no completed run is available for analysis."
+    assert len(completed) > 0, "no completed run is available for analysis."
     grouped = group_runs_by_variant(completed)
 
     summary_df = build_summary_table(grouped)
     summary_df.to_csv(output_dir / "summary_table.csv", index=False)
-    logger.info(f"✅ summary table saved: {output_dir / 'summary_table.csv'}")
+    logger.info(f"summary table saved: {output_dir / 'summary_table.csv'}")
 
     conv_df = convergence_report(grouped)
     conv_df.to_csv(output_dir / "convergence_report.csv", index=False)
@@ -219,7 +199,7 @@ def generate_full_report(
                 f, ensure_ascii=False, indent=2, default=str,
             )
     else:
-        logger.warning(f"⚠️ baseline '{baseline_name}' not in the results; statistical comparison skipped.")
+        logger.warning(f"baseline '{baseline_name}' not in the results; statistical comparison skipped.")
 
     latex_table = dataframe_to_latex_table(
         summary_df, caption="Performance comparison across all variants (mean $\\pm$ std over seeds)",
@@ -228,7 +208,7 @@ def generate_full_report(
     with open(output_dir / "main_results_table.tex", "w", encoding="utf-8") as f:
         f.write(latex_table)
 
-    logger.info("🏁 analysis complete; all outputs in " + str(output_dir))
+    logger.info("analysis complete; all outputs in " + str(output_dir))
     return {
         "summary_table": summary_df,
         "convergence_report": conv_df,

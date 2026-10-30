@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-benchmark.py — speed of the fallback compared with a plain Python loop
-==============================================================================
-This script only documents why the vectorized version replaced the plain
-loop and why Rust was not needed.
-Run: python -m src.rust_ext.benchmark
+"""Timing of the numpy boundary computation against a plain Python loop.
+
+    python -m src.rust_ext.benchmark
 """
 
 from __future__ import annotations

@@ -1,18 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-federated_dataset.py — client subgraphs + masks + boundary statistics
-=====================================================================
-This module takes the global graph + the partition assignment and builds an
-independent torch_geometric.data.Data (local subgraph) for every client, which is
-passed directly to src/fed/client.py.
+"""Client subgraphs, masks and boundary statistics.
 
-Key points:
-  1) each client subgraph contains only within-client edges (induced
-     subgraph). Boundary edges (between two clients) are counted in this module
-     and extracted as boundary-node statistics, so that the virtual-node layer
-     can align clients without revealing the identity of the data.
-  2) local<->global indices are kept for every client so that they can be
-     traced in the final analysis (e.g. per-client tables).
+Each client receives the subgraph induced by its nodes (edges between clients are
+dropped). Boundary nodes, those with an edge to another client, are counted and
+summarized for the virtual-node layer. Local-to-global index maps are kept for
+per-client evaluation.
 """
 
 from __future__ import annotations
@@ -31,9 +23,7 @@ from src.config import PartitionConfig, VirtualNodeConfig
 logger = logging.getLogger("fedgnn.data.federated_dataset")
 
 
-# ==============================================================================
 # Data structure for the boundary information of each client
-# ==============================================================================
 @dataclass
 class BoundaryInfo:
     """
@@ -48,9 +38,7 @@ class BoundaryInfo:
     boundary_degree: np.ndarray = None            # number of external edges of each boundary node
 
 
-# ==============================================================================
 # Subgraph of one client
-# ==============================================================================
 def _build_client_subgraph(
     data: Data,
     assignment: np.ndarray,
@@ -87,9 +75,7 @@ def _build_client_subgraph(
     return client_data, global_node_idx
 
 
-# ==============================================================================
 # Boundary information (without revealing raw data)
-# ==============================================================================
 def _compute_boundary_info(
     data: Data,
     assignment: np.ndarray,
@@ -101,8 +87,8 @@ def _compute_boundary_info(
     Identify the boundary nodes of client client_id: nodes that have at least one
     global edge to a node in another client.
 
-    Important for privacy: only counts/statistics are computed in this function;
-    no raw feature of an external neighbour is read or stored. What is exchanged
+    Only counts and statistics are computed here; no feature of a neighbour in
+    another client is read or stored. What is exchanged
     later (by the virtual-node layer) is only aggregate statistics (mean/variance),
     not raw data.
     """
@@ -144,9 +130,7 @@ def _compute_boundary_info(
     )
 
 
-# ==============================================================================
 # Full federated dataset (public entry point)
-# ==============================================================================
 @dataclass
 class FederatedClientData:
     """Complete data bundle of one client; direct input of src/fed/client.py."""
@@ -177,7 +161,7 @@ def build_federated_dataset(
         client_data, global_node_idx = _build_client_subgraph(data, assignment, client_id)
 
         if client_data.num_nodes == 0:
-            logger.warning(f"⚠️ client {client_id} has no nodes; removed from the registry.")
+            logger.warning(f"client {client_id} has no nodes; removed from the registry.")
             continue
 
         global_to_local = {g: i for i, g in enumerate(global_node_idx)}
@@ -200,22 +184,20 @@ def build_federated_dataset(
         clients.append(fcd)
 
         logger.info(
-            f"👤 client {client_id}: n_nodes={fcd.num_nodes} | n_edges={fcd.num_edges} | "
+            f"client {client_id}: n_nodes={fcd.num_nodes} | n_edges={fcd.num_edges} | "
             f"n_train={fcd.num_train} | n_pos_train={fcd.num_positives_train} | "
             f"n_boundary={len(boundary_info.local_boundary_idx)}"
         )
 
     total_boundary = sum(len(c.boundary_info.local_boundary_idx) for c in clients)
     logger.info(
-        f"✅ federated dataset built: {len(clients)} active clients | "
+        f"federated dataset built: {len(clients)} active clients | "
         f"total boundary nodes (counted repeatedly across clients)={total_boundary}"
     )
     return clients
 
 
-# ==============================================================================
 # Aggregate boundary statistics for the virtual nodes
-# ==============================================================================
 def compute_boundary_exchange_payload(
     client: FederatedClientData,
     virtual_cfg: VirtualNodeConfig,
@@ -224,7 +206,7 @@ def compute_boundary_exchange_payload(
     Build a client's exchange payload for virtual-node alignment,
     following the exchange_payload policy in VirtualNodeConfig.
 
-    ⚠️ Privacy: the output of this function is only aggregate statistics (mean/variance
+    Privacy: the output of this function is only aggregate statistics (mean/variance
     of boundary-node features); no raw feature vector or node identifier is sent.
     Optional noise / secure-aggregation protection (src/fed/privacy.py) is applied to
     this same payload.
@@ -271,9 +253,7 @@ def compute_boundary_exchange_payload(
     return payload
 
 
-# ==============================================================================
-# Compatibility layer with the src/train.py contract
-# ==============================================================================
+# Entry points used by src/train.py
 import copy as _copy
 import torch as _torch
 
@@ -288,9 +268,9 @@ def build_centralized_splits(full_data, seed: int = 42, cfg=None):
     Centralized baseline: no client split is performed and the full graph is returned
     with the temporal masks built in elliptic.py.
 
-    Important for the validity of the paper: the test mask here is exactly the mask that
-    build_global_test_split gives to the federated variants. Centralized and
-    FedGNN are therefore measured on one and the same test set, and the comparison is fair.
+    The test mask is the same mask that build_global_test_split gives to the
+    federated variants, so centralized and federated models are tested on the
+    same nodes.
     """
     d = _copy.copy(full_data)
     for m in ("train_mask", "val_mask", "test_mask"):
