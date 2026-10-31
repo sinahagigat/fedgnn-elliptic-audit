@@ -4,6 +4,7 @@ title: "fedgnn-elliptic-audit: code and run records"
 type: software
 license: MIT
 repository-code: "https://github.com/sinahagigat/fedgnn-elliptic-audit"
+doi: "10.5281/zenodo.23825265"
 authors:
   - family-names: Haghighat
     given-names: Sina

@@ -1,5 +1,7 @@
 # fedgnn-elliptic-audit
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23825265.svg)](https://doi.org/10.5281/zenodo.23825265)
+
 Code, configurations and run records for the article
 
 > **When the protocol picks the winner: a controlled variance audit of federated graph neural networks for illicit Bitcoin transaction detection**
@@ -133,7 +135,7 @@ Each run in `results/v7/<job>/artifacts_slim.json` contains the variant, seed, c
 
 ## Citation
 
-See `CITATION.cff`. Please also cite the Elliptic dataset:
+See `CITATION.cff`. The archived release (code, run records and prediction scores) is on Zenodo: https://doi.org/10.5281/zenodo.23825265. Please also cite the Elliptic dataset:
 Weber, M. et al. (2019). Anti-money laundering in Bitcoin: Experimenting with graph convolutional networks for financial forensics. KDD Workshop on Anomaly Detection in Finance.
 
 ## License
