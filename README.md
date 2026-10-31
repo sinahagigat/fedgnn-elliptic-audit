@@ -15,7 +15,7 @@ The study runs eight federated and centralized graph neural network designs and 
 | `configs/v7_*.yaml` | one configuration per protocol (A, B, C0–C24, D, E, F, G, the temperature sweep T, and V, N, P0–P24, Q0–Q9, R, L, M, W, S50, S100, Z20, Z50, Z100, ZN, ZM); see `configs/README.md` |
 | `configs/legacy/` | configuration of the earlier non-deterministic GPU execution |
 | `tools/` | job table, job runners, determinism check, result merging, release verification |
-| `colab/` | notebook used to run jobs on Google Colab |
+| `colab/` | optional notebook for running single jobs on Google Colab (the reported runs were executed on one CPU workstation) |
 | `results/v7/` | records of all 7,800 runs, one file per job (`artifacts_slim.json`) |
 | `results/diagnostics/` | partition composition, per-round client scores (`history*.json.gz`), per-time-step AP and the reference-model results |
 | `results/v6a/` | records of the 480 runs of the earlier GPU execution (protocols A, B, C0) |

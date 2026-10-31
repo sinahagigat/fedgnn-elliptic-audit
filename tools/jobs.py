@@ -1,7 +1,7 @@
 """
 The v7 job table. One job = one experiment config x a block of seeds.
-Each job writes its own artifacts file, so several Colab accounts can run
-different jobs at the same time without touching each other's files.
+Each job writes its own artifacts file, so several jobs can run in parallel
+without touching each other's files.
 
     python tools/jobs.py            # print the table
 """

@@ -30,12 +30,11 @@ common = {
     ("experiment", "eval_local"): True,
     ("experiment", "eval_tuned_threshold"): True,
     ("experiment", "save_predictions"): True,
-    # secure aggregation never ran in v6a (every call failed and fell back to
-    # the raw payload); switching it off gives the identical computation
-    # without the failing call
+    # no payload protection or secure aggregation is applied in any reported
+    # run (the earlier v6a runs also exchanged the raw payload)
     ("virtual", "protection"): "none",
     ("privacy", "secure_agg_enabled"): False,
-    # the Rust extension was never built; the numpy fallback always ran
+    # the optional compiled extension is not used; the NumPy implementation runs
     ("rust", "use_rust"): False,
 }
 

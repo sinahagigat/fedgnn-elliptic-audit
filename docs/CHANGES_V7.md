@@ -31,13 +31,13 @@ is behind config flags that the v7 configs switch on.
 * An artifacts file refuses runs from a different config hash or code hash.
 * `main.py --seeds --variants` run one shard; the config hash is always taken from the full config.
 
-## Facts about v6a that the paper must state (unchanged in v7)
+## Properties of the v6a code that v7 keeps
 
 * All 10 clients train in every round; `participation_frac` is not used by the server.
 * With `local_epochs=1` the FedProx proximal gradient is exactly zero, so FedProx equals FedAvg.
 * FedProto, FedGNN_Hard and FedGNN_Soft all use the prototype loss; Hard keeps the top 5 clients by score, Soft weights clients by softmax(score/0.5) times data share; score = client validation AP x log(1 + training positives).
 * Trainable parameters: GCN 15,300; GCN + virtual nodes 32,260; GAT + virtual nodes 45,188.
 * The virtual-node payload is the mean raw feature vector of each client's boundary nodes, averaged over clients by boundary degree, projected by a frozen random linear layer, identical for all clients and constant over rounds.
-* The Rust extension was never built (module name mismatch); the numpy fallback ran.
-* Secure aggregation was configured but every call failed and fell back to the raw payload.
-* Many `selection.*` and `fed.w_exp_*` keys are not read by any code path.
+* The optional compiled (Rust) extension is not used; the NumPy implementation of the same graph utilities runs.
+* No secure aggregation or payload protection is applied; the virtual-node payload is exchanged as described above.
+* Several configuration keys (`selection.*`, `fed.w_exp_*`) are inactive; see `configs/README.md`.
